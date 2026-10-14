@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Checklists - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Checklists</h1><p class="muted">Reusable lists of steps, for example for a new starter or a leaver. Start one for a person from any company page.</p></div></div>
+
+{% for t in templates %}
+<form method="post" class="card">
+  {{ csrf() }}<input type="hidden" name="template_id" value="{{ t.id }}">
+  <div class="field"><label for="name{{ t.id }}">Name</label><input type="text" id="name{{ t.id }}" name="name" value="{{ t.name }}" required></div>
+  <div class="field"><label for="items{{ t.id }}">Steps, one per line</label><textarea id="items{{ t.id }}" name="items" style="min-height:160px" required>{{ t.items }}</textarea></div>
+  <div class="row">
+    <button class="btn ghost fit">Save changes</button>
+    <button class="btn danger fit" name="delete" value="1" formnovalidate onclick="return confirm('Delete this checklist? Checklists already started are kept.')">Delete</button>
+  </div>
+</form>
+{% endfor %}
+
+<form method="post" class="card">
+  {{ csrf() }}
+  <h2>New checklist</h2>
+  <div class="field"><label for="name">Name</label><input type="text" id="name" name="name" required></div>
+  <div class="field"><label for="items">Steps, one per line</label><textarea id="items" name="items" style="min-height:160px" required></textarea></div>
+  <button class="btn">Add checklist</button>
+</form>
+{% endblock %}

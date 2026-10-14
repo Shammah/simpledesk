@@ -1,0 +1,13 @@
+# Caddy sits in front of SimpleDesk: it gets and renews the HTTPS certificate
+# by itself and passes visits on to the app. {DOMAIN} is filled in by setup.sh.
+{DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8000
+}

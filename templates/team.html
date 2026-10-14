@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Team & plan - {{ app_name }}{% endblock %}
+{% block content %}
+{% set owner = g.tech.role == 'owner' %}
+{# Inside the Play Store app, prices and plan changes are hidden: Google requires its own billing for that. #}
+<div class="head"><div><h1>Team &amp; plan</h1><p class="muted">{{ 'Your team and this month''s allowance.' if g.android else 'You pay per technician. Client companies and their staff are unlimited.' }}</p></div></div>
+
+<div class="grid">
+  {% if not g.android %}<div class="stat hero"><div class="n">{{ currency }}{{ bill.monthly_cost }}</div><div class="l">per month: {{ bill.seats }} technician{{ 's' if bill.seats != 1 }} &times; {{ currency }}{{ bill.plan.price_per_tech }}</div></div>{% endif %}
+  <div class="stat{{ ' hero' if g.android }}"><div class="n">{{ bill.plan.name }}</div><div class="l">current plan</div></div>
+  <div class="stat"><div class="n">{{ bill.ai_left }}</div><div class="l">AI replies left this month, of {{ bill.ai_allowance }}</div></div>
+  {% if g.android %}<div class="stat"><div class="n">{{ bill.seats }}</div><div class="l">technician{{ 's' if bill.seats != 1 }}</div></div>{% endif %}
+</div>
+
+{% if g.android %}
+<div class="note">Plan changes aren't available in the Android app.</div>
+{% else %}
+<div class="half">
+  {% for key, p in plans.items() %}
+  <div class="card">
+    <h2>{{ p.name }} {% if key == bill.plan_key %}<span class="tag good">Current</span>{% endif %}</h2>
+    <p><span style="font-size:26px;font-weight:700">{{ currency }}{{ p.price_per_tech }}</span> <span class="muted">per technician, per month</span></p>
+    <ul>
+      <li>{{ 'Up to ' ~ p.max_techs ~ ' technician' if p.max_techs else 'Unlimited technicians' }}</li>
+      <li>{{ p.ai_replies_per_tech }} AI replies per technician each month</li>
+      <li>Unlimited client companies, people and devices</li>
+      <li>Data download at any time</li>
+    </ul>
+    {% if owner and key != bill.plan_key %}
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="plan"><input type="hidden" name="plan" value="{{ key }}">
+      <button class="btn">Switch to {{ p.name }}</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+<p class="small muted">Payment collection is not connected yet, so switching plans is free while you are testing. When the allowance runs out, requests go straight to a technician and nothing is lost.</p>
+{% endif %}
+
+<div class="card">
+  <h2>Technicians</h2>
+  <div class="scroll"><table>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
+    {% for t in techs %}
+    <tr><td>{{ t.name }}</td><td>{{ t.email }}</td><td>{{ 'Owner' if t.role == 'owner' else 'Technician' }}</td>
+      <td>{% if owner and t.role != 'owner' %}
+        <form method="post" data-confirm="Remove {{ t.name }}? They will no longer be able to sign in." onsubmit="return confirm(this.dataset.confirm)">{{ csrf() }}
+          <input type="hidden" name="action" value="remove"><input type="hidden" name="tech_id" value="{{ t.id }}"><button class="link">Remove</button></form>
+      {% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if owner %}
+  <form method="post" style="margin-top:16px">
+    {{ csrf() }}<input type="hidden" name="action" value="add">
+    <div class="row">
+      <div><label for="name">Name</label><input type="text" id="name" name="name" required></div>
+      <div><label for="email">Email</label><input type="email" id="email" name="email" required></div>
+      <div><label for="password">Starting password</label><input type="password" id="password" name="password" minlength="8" required autocomplete="new-password"></div>
+      <button class="btn ghost fit">Add technician</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

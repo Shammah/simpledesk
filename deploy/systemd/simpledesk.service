@@ -1,0 +1,20 @@
+[Unit]
+Description=SimpleDesk website
+After=network.target
+
+[Service]
+User=simpledesk
+Group=simpledesk
+WorkingDirectory=/opt/simpledesk/app
+EnvironmentFile=/etc/simpledesk.env
+ExecStart=/opt/simpledesk/venv/bin/gunicorn --preload --workers 3 --bind 127.0.0.1:8000 --timeout 60 --access-logfile - app:app
+Restart=always
+RestartSec=3
+# Limit what the app may touch on the server.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/simpledesk /var/backups/simpledesk
+
+[Install]
+WantedBy=multi-user.target

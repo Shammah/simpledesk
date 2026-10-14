@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Companies - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Companies</h1><p class="muted">The clients you look after. Each one's data is kept separate.</p></div></div>
+<form method="post" class="card row">
+  {{ csrf() }}
+  <div><label for="name">Add a client company</label><input type="text" id="name" name="name" placeholder="Company name" required></div>
+  <button class="btn fit">Add company</button>
+</form>
+<div class="card">
+  {% if companies %}
+  <div class="scroll"><table>
+    <tr><th>Company</th><th>People</th><th>Devices</th><th>Waiting for technician</th><th>AI first reply</th></tr>
+    {% for c in companies %}
+    <tr>
+      <td><a href="{{ url_for('company', company_id=c.id) }}">{{ c.name }}</a></td>
+      <td>{{ c.people }}</td><td>{{ c.devices }}</td><td>{{ c.open }}</td>
+      <td><span class="tag {{ 'good' if c.ai_enabled }}">{{ 'On' if c.ai_enabled else 'Off' }}</span></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">No companies yet. Add your first client above to get their help link.</p>{% endif %}
+</div>
+{% endblock %}

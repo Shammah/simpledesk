@@ -1,0 +1,19 @@
+[Unit]
+Description=SimpleDesk mailbox checker
+After=network.target simpledesk.service
+
+[Service]
+User=simpledesk
+Group=simpledesk
+WorkingDirectory=/opt/simpledesk/app
+EnvironmentFile=/etc/simpledesk.env
+ExecStart=/opt/simpledesk/venv/bin/python tools/email_worker.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/simpledesk
+
+[Install]
+WantedBy=multi-user.target

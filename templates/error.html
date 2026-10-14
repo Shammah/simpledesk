@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ {404: "Page not found", 403: "Not allowed", 400: "Something went wrong"}.get(code, "Error") }}</h1>
+<p class="muted">{{ message if code == 400 else "This page does not exist, or you do not have access to it." }}</p>
+{% endblock %}

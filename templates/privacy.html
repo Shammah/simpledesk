@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Privacy & data - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Privacy &amp; data</h1><p class="muted">Plain answers you can give a client who asks. The public version is the
+    <a href="{{ url_for('privacy_policy') }}">privacy policy</a>.</p></div>
+  {% if g.tech.role == 'owner' %}<a class="btn" href="{{ url_for('export_all') }}" data-no-loader>Download everything</a>{% endif %}
+</div>
+
+<div class="half">
+  <div class="card">
+    <h2>Where the data lives</h2>
+    <p>Everything is stored in one database on the computer or server running {{ app_name }}:</p>
+    <div class="copy">{{ db_path }}</div>
+    <p style="margin-top:12px">Back up that file to back up everything. Passwords for technician accounts are stored scrambled and cannot be read back.</p>
+    <h2>Keeping clients apart</h2>
+    <p>Every ticket, person, device and company guide is tagged with its company. A company's staff only ever see their own requests, and guides written for one company are never used to answer another.</p>
+    <h2>Email and WhatsApp</h2>
+    <p>If you switch these on, requests and replies on those channels pass through your mail provider and Meta, under their own terms. The mail and WhatsApp passwords are kept in a separate settings file, not in the database, and are never shown on screen.</p>
+    <h2>Taking data out</h2>
+    <p>Open a company and press <strong>Download all data</strong> to get its tickets, conversations, people, devices, guides and checklists as spreadsheet and text files. A client can leave with everything at any time.</p>
+    <h2>Deleting data</h2>
+    <p>The account owner can delete a company from its page. That removes all of its records from the database for good.</p>
+  </div>
+
+  <div class="card">
+    <h2>What the AI is allowed to do</h2>
+    <ul>
+      <li>It only suggests steps a staff member can safely do alone: restart, reconnect, check a setting.</li>
+      <li>It answers at most {{ max_replies }} times on a ticket. After that a technician takes over.</li>
+      <li>It never changes anything itself. It can only write a reply.</li>
+      <li>Its reply is checked before it is shown. Anything involving command lines, system settings, switching off security software or opening a device is blocked and sent to you instead.</li>
+      <li>You can switch it off for any single company.</li>
+    </ul>
+    <h2>Requests it never answers</h2>
+    <p>These go straight to a technician:</p>
+    <ul>{% for r in rules %}<li>{{ r }}</li>{% endfor %}</ul>
+    <h2>What is sent to the AI</h2>
+    <p>Only the text of that one request, and the guides that company may see. Names, emails, device details and other tickets are not sent. Passwords and card-like numbers typed into a request are removed before the request is saved or sent.</p>
+    <p class="small muted">AI model: {{ model }}, provided by Anthropic. With no AI key set up, answers come from your written guides only and nothing leaves this computer.</p>
+  </div>
+</div>
+{% endblock %}

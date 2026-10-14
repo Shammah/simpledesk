@@ -1,0 +1,19 @@
+# Never upload these: they hold client data, passwords or keys.
+data/
+server-backups/
+*.db
+*.db-wal
+*.db-shm
+channels.ini
+secret.key
+# Android signing keys from PWABuilder. Keep these private and backed up elsewhere.
+*.keystore
+*.jks
+signing-key*
+
+# Rebuildable or local-only files
+.venv/
+__pycache__/
+*.pyc
+.claude/
+*.tgz

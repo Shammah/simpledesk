@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Your request - {{ c.name }}{% endblock %}
+{% block wrap %}public{% endblock %}
+{% block content %}
+<h1>Your request</h1>
+<p><span class="tag {{ t.status }}">{{ {'ai_answered': 'Answered: did it work?', 'open': 'With a technician', 'resolved': 'Solved'}[t.status] }}</span>
+  <span class="muted small">Keep this page open or bookmark it to see replies.</span></p>
+
+{% for m in messages %}
+<div class="msg {{ m.sender }}">
+  <div class="by">{{ {'user': 'You', 'ai': 'IT help (automatic answer)', 'tech': m.author_name ~ ', technician', 'system': 'IT help'}[m.sender] }} &middot; {{ m.created_at|ago }}</div>
+  <div class="body">{{ m.body }}</div>
+</div>
+{% endfor %}
+
+{% if t.status == 'ai_answered' %}
+<div class="card">
+  <h2>Did that solve it?</h2>
+  <form method="post" class="row">
+    {{ csrf() }}
+    <button class="btn ok fit" name="action" value="solved">Yes, it is fixed</button>
+    <button class="btn ghost fit" name="action" value="human">I still need help</button>
+  </form>
+</div>
+{% elif t.status == 'open' %}
+<div class="note">A technician has your request and will reply here. <a href="">Check for a reply</a></div>
+<form method="post" style="margin-bottom:16px">{{ csrf() }}<button class="btn ghost" name="action" value="solved">It is fixed now, close my request</button></form>
+{% else %}
+<div class="note">This request is closed. If the problem comes back, write below and it will reopen.</div>
+{% endif %}
+
+<form method="post" class="card">
+  {{ csrf() }}<input type="hidden" name="action" value="reply">
+  <div class="field"><label for="body">Add more detail</label><textarea id="body" name="body" maxlength="6000" required></textarea></div>
+  <button class="btn ghost">Send</button>
+</form>
+<p class="small"><a href="{{ url_for('portal', token=c.portal_token) }}">Ask about something else</a></p>
+{% endblock %}

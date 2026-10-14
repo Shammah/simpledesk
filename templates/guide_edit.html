@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit guide' if a else 'New guide' }} - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><p class="small muted"><a href="{{ url_for('guides') }}">Guides</a> /</p><h1>{{ 'Edit guide' if a else 'New guide' }}</h1></div></div>
+<div class="note">Only write steps a staff member can safely do alone. Anything needing administrator rights should say "ask for a technician".</div>
+<form method="post" class="card">
+  {{ csrf() }}
+  <div class="field"><label for="title">Title</label><input type="text" id="title" name="title" value="{{ a.title if a }}" required></div>
+  <div class="field"><label for="company_id">Used for</label>
+    <select id="company_id" name="company_id">
+      <option value="">All clients</option>
+      {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if a and a.company_id == c.id }}>{{ c.name }} only</option>{% endfor %}
+    </select></div>
+  <div class="field"><label for="keywords">Words people use for this problem</label>
+    <input type="text" id="keywords" name="keywords" value="{{ a.keywords if a }}" placeholder="printer print queue stuck paper jam"></div>
+  <div class="field"><label for="body">Steps</label><textarea id="body" name="body" style="min-height:240px" required>{{ a.body if a }}</textarea></div>
+  <div class="row">
+    <button class="btn fit">Save guide</button>
+    {% if a %}<button class="btn danger fit" name="delete" value="1" formnovalidate onclick="return confirm('Delete this guide?')">Delete</button>{% endif %}
+  </div>
+</form>
+{% endblock %}

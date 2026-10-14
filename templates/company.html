@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <div><p class="small muted"><a href="{{ url_for('companies') }}">Companies</a> /</p><h1>{{ c.name }}</h1></div>
+  <div class="row">
+    <a class="btn ghost fit" href="{{ url_for('tickets', status='all', company=c.id) }}">Tickets</a>
+    <a class="btn fit" href="{{ url_for('company_export', company_id=c.id) }}" data-no-loader>Download all data</a>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="stat hero"><div class="n">{{ m.ai_rate ~ '%' if m.ai_rate is not none else '-' }}</div><div class="l">solved without a technician</div></div>
+  <div class="stat"><div class="n">{{ m.total }}</div><div class="l">tickets</div></div>
+  <div class="stat"><div class="n">{{ m.open }}</div><div class="l">waiting for a technician</div></div>
+  <div class="stat"><div class="n">{{ m.hours_saved }}</div><div class="l">technician hours saved</div></div>
+</div>
+
+<div class="card">
+  <h2>Help link for {{ c.name }} staff</h2>
+  <p class="muted small">Share this link with their staff. They describe the problem, get an instant answer, and reach you if it does not work. No login needed.</p>
+  <div class="copy">{{ portal_url }}</div>
+  <div class="row" style="margin-top:12px">
+    <a class="btn ghost fit" href="{{ portal_url }}" target="_blank" rel="noopener">Open help page</a>
+    <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" class="fit">
+      {{ csrf() }}<button class="btn ghost" name="action" value="toggle_ai">
+        AI first reply is {{ 'on' if c.ai_enabled else 'off' }}: turn {{ 'off' if c.ai_enabled else 'on' }}</button>
+    </form>
+    <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" class="fit"
+          onsubmit="return confirm('Create a new link? The current link will stop working.')">
+      {{ csrf() }}<button class="btn ghost" name="action" value="new_link">Replace link</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Requests by email</h2>
+  <p class="muted small">Emails from people listed below are matched to {{ c.name }} automatically. To also accept anyone writing from the company's own email domain, enter it here. Leave it empty for shared domains like gmail.com.</p>
+  <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" class="row">
+    {{ csrf() }}<input type="hidden" name="action" value="email_domain">
+    <div><label for="email_domain">Email domain</label><input type="text" id="email_domain" name="email_domain" value="{{ c.email_domain }}" placeholder="theircompany.com"></div>
+    <button class="btn ghost fit">Save</button>
+  </form>
+</div>
+
+<div class="half">
+  <div class="card" id="people">
+    <h2>People ({{ people|length }})</h2>
+    {% if people %}
+    <div class="scroll"><table>
+      <tr><th>Name</th><th>Role</th><th></th></tr>
+      {% for p in people %}
+      <tr><td>{{ p.name }}<br><span class="muted small">{{ p.email }}{% if p.phone %} &middot; +{{ p.phone }}{% endif %}</span></td><td class="small">{{ p.job_title }}</td>
+        <td><form method="post" action="{{ url_for('remove_row', company_id=c.id) }}" data-confirm="Remove {{ p.name }}?" onsubmit="return confirm(this.dataset.confirm)">
+          {{ csrf() }}<input type="hidden" name="kind" value="person"><input type="hidden" name="id" value="{{ p.id }}"><button class="link">Remove</button></form></td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    <form method="post" action="{{ url_for('add_person', company_id=c.id) }}" style="margin-top:14px">
+      {{ csrf() }}
+      <div class="row">
+        <div><label for="p_name">Name</label><input type="text" id="p_name" name="name" required></div>
+        <div><label for="p_email">Email</label><input type="email" id="p_email" name="email"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div><label for="p_phone">WhatsApp number</label><input type="text" id="p_phone" name="phone" placeholder="+250 788 123 456" inputmode="tel"></div>
+        <div><label for="p_job">Role</label><input type="text" id="p_job" name="job_title"></div>
+        <button class="btn ghost fit">Add person</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" id="devices">
+    <h2>Devices ({{ devices|length }})</h2>
+    {% if devices %}
+    <div class="scroll"><table>
+      <tr><th>Device</th><th>Used by</th><th>Warranty</th><th></th></tr>
+      {% for d in devices %}
+      <tr><td>{{ d.name }}<br><span class="muted small">{{ d.kind }}{% if d.serial %}, {{ d.serial }}{% endif %}</span></td>
+        <td class="small">{{ d.person_name or 'Unassigned' }}</td>
+        <td class="small">{% if d.warranty_end %}<span class="tag {{ 'bad' if d.warranty_end < today }}">{{ d.warranty_end }}</span>{% endif %}</td>
+        <td><form method="post" action="{{ url_for('remove_row', company_id=c.id) }}" data-confirm="Remove {{ d.name }}?" onsubmit="return confirm(this.dataset.confirm)">
+          {{ csrf() }}<input type="hidden" name="kind" value="device"><input type="hidden" name="id" value="{{ d.id }}"><button class="link">Remove</button></form></td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    <form method="post" action="{{ url_for('add_device', company_id=c.id) }}" style="margin-top:14px">
+      {{ csrf() }}
+      <div class="row">
+        <div><label for="d_name">Device name</label><input type="text" id="d_name" name="name" placeholder="Dell Latitude 5440" required></div>
+        <div><label for="d_kind">Type</label><select id="d_kind" name="kind">
+          {% for k in ['Laptop', 'Desktop', 'Phone', 'Tablet', 'Printer', 'Network', 'Other'] %}<option>{{ k }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div><label for="d_serial">Serial number</label><input type="text" id="d_serial" name="serial"></div>
+        <div><label for="d_warranty">Warranty ends</label><input type="date" id="d_warranty" name="warranty_end"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div><label for="d_person">Used by</label><select id="d_person" name="person_id"><option value="">Unassigned</option>
+          {% for p in people %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select></div>
+        <button class="btn ghost fit">Add device</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Starter and leaver checklists</h2>
+  {% if runs %}
+  <ul class="plain" style="margin-bottom:14px">
+    {% for r in runs %}
+    <li><a href="{{ url_for('checklist', run_id=r.id) }}">{{ r.template_name }}: {{ r.subject_name }}</a>
+      <span class="tag {{ 'good' if r.done == r.total }}">{{ r.done }} of {{ r.total }} done</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if not templates %}<p class="muted">You have no checklists yet. <a href="{{ url_for('checklist_templates') }}">Create one</a> to use it here.</p>{% else %}
+  <form method="post" action="{{ url_for('checklist_start', company_id=c.id) }}" class="row">
+    {{ csrf() }}
+    <div><label for="template_id">Checklist</label><select id="template_id" name="template_id">
+      {% for t in templates %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}</select></div>
+    <div><label for="subject">For</label><input type="text" id="subject" name="subject" placeholder="Person's name" required></div>
+    <button class="btn ghost fit">Start checklist</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if g.tech.role == 'owner' %}
+<div class="card">
+  <h2>Delete this company</h2>
+  <p class="muted small">Permanently removes {{ c.name }} and all of its tickets, people, devices, guides and checklists. This cannot be undone. Download the data first if they may need it.</p>
+  <form method="post" action="{{ url_for('company_delete', company_id=c.id) }}" class="row">
+    {{ csrf() }}
+    <div><label for="confirm">Type the company name to confirm</label><input type="text" id="confirm" name="confirm" autocomplete="off"></div>
+    <button class="btn danger fit">Delete company and data</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

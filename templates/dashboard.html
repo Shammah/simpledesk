@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Dashboard</h1><p class="muted">How support is going across all your clients.</p></div>
+  <a class="btn" href="{{ url_for('tickets') }}">Open tickets ({{ all_time.open }})</a>
+</div>
+
+<div class="grid">
+  <div class="stat hero">
+    <div class="n">{{ all_time.ai_rate ~ '%' if all_time.ai_rate is not none else '-' }}</div>
+    <div class="l">of resolved tickets solved without a technician</div>
+  </div>
+  <div class="stat"><div class="n">{{ all_time.hours_saved }}</div><div class="l">technician hours saved (all time)</div></div>
+  <div class="stat"><div class="n">{{ month.total }}</div><div class="l">tickets this month</div></div>
+  <div class="stat"><div class="n">{{ all_time.open }}</div><div class="l">waiting for a technician</div></div>
+  <div class="stat">
+    <div class="n">{{ (all_time.reply_minutes ~ ' min') if all_time.reply_minutes is not none else '-' }}</div>
+    <div class="l">average time to first reply</div>
+  </div>
+</div>
+
+<div class="cols">
+  <div>
+    <div class="card">
+      <h2>Needs a technician</h2>
+      {% if queue %}
+      <div class="scroll"><table>
+        <tr><th>Request</th><th>Company</th><th>Why it came to you</th><th>Opened</th></tr>
+        {% for t in queue %}
+        <tr>
+          <td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a><br><span class="muted small">{{ t.requester_name }}</span></td>
+          <td>{{ t.company_name }}</td>
+          <td class="small">{{ t.escalation_reason }}</td>
+          <td class="small muted">{{ t.created_at|ago }}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+      {% else %}<p class="muted">Nothing waiting. </p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>By company</h2>
+      {% if by_company %}
+      <div class="scroll"><table>
+        <tr><th>Company</th><th>Tickets</th><th>Solved by AI</th><th>Solved by technician</th><th>Without a technician</th></tr>
+        {% for c, m in by_company %}
+        <tr>
+          <td><a href="{{ url_for('company', company_id=c.id) }}">{{ c.name }}</a></td>
+          <td>{{ m.total }}</td><td>{{ m.by_ai }}</td><td>{{ m.by_human }}</td>
+          <td>{{ m.ai_rate ~ '%' if m.ai_rate is not none else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </table></div>
+      {% else %}<p class="muted">No companies yet. <a href="{{ url_for('companies') }}">Add your first client</a>.</p>{% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Most common problems</h2>
+      {% if categories %}
+      <ul class="plain">
+        {% for c in categories %}
+        <li>
+          <div style="display:flex;justify-content:space-between"><span>{{ c.category }}</span><span class="muted small">{{ c.n }} ticket{{ 's' if c.n != 1 }}, {{ c.by_ai or 0 }} by AI</span></div>
+          <div class="bar"><span style="width: {{ (100 * c.n / categories[0].n)|round|int }}%"></span></div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="muted">No tickets yet.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <h2>AI replies this month</h2>
+      <p><strong>{{ bill.ai_used }}</strong> of {{ bill.ai_allowance }} used</p>
+      <div class="bar"><span style="width: {{ [100, (100 * bill.ai_used / bill.ai_allowance)|round|int]|min if bill.ai_allowance else 0 }}%"></span></div>
+      <p class="small muted" style="margin-top:8px">{{ bill.plan.name }} plan, {{ bill.seats }} technician{{ 's' if bill.seats != 1 }}. <a href="{{ url_for('team') }}">Manage</a></p>
+    </div>
+
+    <div class="card">
+      <h2>Warranties ending soon</h2>
+      {% if warranties %}
+      <ul class="plain">
+        {% for d in warranties %}
+        <li>{{ d.name }} <span class="muted small">{{ d.company_name }}</span><br>
+          <span class="tag {{ 'bad' if d.warranty_end < today else 'open' }}">{{ 'Ended' if d.warranty_end < today else 'Ends' }} {{ d.warranty_end }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="muted">None in the next 60 days.</p>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

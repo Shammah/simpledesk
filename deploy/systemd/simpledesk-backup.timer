@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up SimpleDesk every night
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=10min
+# If the server was off at 02:30, back up as soon as it is on again.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

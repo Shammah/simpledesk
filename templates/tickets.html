@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Tickets - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Tickets</h1></div>
+  <form method="get" class="row" style="min-width:240px">
+    <input type="hidden" name="status" value="{{ status }}">
+    <select name="company" onchange="this.form.submit()" aria-label="Filter by company">
+      <option value="">All companies</option>
+      {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if c.id == company_id }}>{{ c.name }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+<div class="tabs">
+  {% for key, label in [('open', 'Needs technician'), ('ai_answered', 'AI answered'), ('resolved', 'Resolved'), ('all', 'All')] %}
+  <a href="{{ url_for('tickets', status=key, company=company_id) }}" class="{{ 'on' if status == key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+<div class="card">
+  {% if tickets %}
+  <div class="scroll"><table>
+    <tr><th>#</th><th>Request</th><th>Company</th><th>Type</th><th>Status</th><th>Technician</th><th>Opened</th></tr>
+    {% for t in tickets %}
+    <tr>
+      <td class="muted">{{ t.id }}</td>
+      <td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a><br><span class="muted small">{{ t.requester_name }}</span></td>
+      <td>{{ t.company_name }}</td>
+      <td class="small">{{ t.category }}{% if t.channel != 'web' %}<br><span class="tag">{{ 'WhatsApp' if t.channel == 'whatsapp' else 'Email' }}</span>{% endif %}</td>
+      <td><span class="tag {{ t.status }}">{{ status_labels[t.status] }}</span>
+        {% if t.resolved_by %}<span class="small muted">by {{ 'AI' if t.resolved_by == 'ai' else 'technician' }}</span>{% endif %}</td>
+      <td class="small">{{ t.tech_name or '' }}</td>
+      <td class="small muted">{{ t.created_at|ago }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">No tickets here.</p>{% endif %}
+</div>
+{% endblock %}

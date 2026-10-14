@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline - SimpleDesk</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/style.css">
+<script>try { var t = localStorage.getItem("theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}</script>
+</head>
+<body>
+<div class="outside">
+  <div class="brandbar"><span class="mark"></span>SimpleDesk</div>
+  <div class="center">
+    <h1>You are offline</h1>
+    <p>SimpleDesk needs an internet connection to load tickets.</p>
+    <div class="card">
+      <p>Check your Wi-Fi or mobile data, then try again. Nothing you already sent has been lost.</p>
+      <button class="btn" onclick="location.reload()">Try again</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

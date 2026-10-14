@@ -1,0 +1,14 @@
+[Unit]
+Description=SimpleDesk backup
+
+[Service]
+Type=oneshot
+User=simpledesk
+Group=simpledesk
+WorkingDirectory=/opt/simpledesk/app
+EnvironmentFile=/etc/simpledesk.env
+ExecStart=/opt/simpledesk/venv/bin/python tools/backup.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/simpledesk /var/backups/simpledesk

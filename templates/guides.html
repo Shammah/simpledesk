@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Guides - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <div><h1>Guides</h1><p class="muted">What the AI answers from. Shared guides apply to every client; company guides are only ever used for that company.</p></div>
+  <a class="btn" href="{{ url_for('guide_edit') }}">New guide</a>
+</div>
+<div class="card">
+  {% if not articles %}<p class="muted">No guides yet. Until you write some, every request goes to a technician unless the AI is switched on. The quickest way to build them up: when you resolve a ticket, tick "save this reply as a guide".</p>{% endif %}
+  <div class="scroll"><table>
+    <tr><th>Guide</th><th>Used for</th><th>Came from</th></tr>
+    {% for a in articles %}
+    <tr>
+      <td><a href="{{ url_for('guide_edit', article_id=a.id) }}">{{ a.title }}</a></td>
+      <td>{% if a.company_name %}<span class="tag ai_answered">{{ a.company_name }} only</span>{% else %}<span class="tag">All clients</span>{% endif %}</td>
+      <td class="small muted">{{ {'starter': 'Included', 'manual': 'Written by you', 'ticket': 'Saved from a ticket'}[a.source] }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% endblock %}

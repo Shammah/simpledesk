@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ run.template_name }}: {{ run.subject_name }} - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div>
+  <p class="small muted"><a href="{{ url_for('company', company_id=run.company_id) }}">{{ run.company_name }}</a> /</p>
+  <h1>{{ run.template_name }}: {{ run.subject_name }}</h1>
+  <p class="muted small">Started {{ run.created_at|ago }}</p>
+</div></div>
+<form method="post" class="card">
+  {{ csrf() }}
+  {% for i in items %}
+  <label class="check"><input type="checkbox" name="done" value="{{ i.id }}" {{ 'checked' if i.done }}> {{ i.text }}</label>
+  {% endfor %}
+  <button class="btn" style="margin-top:8px">Save</button>
+</form>
+{% endblock %}

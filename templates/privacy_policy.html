@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Privacy policy - {{ app_name }}{% endblock %}
+{% block wrap %}public{% endblock %}
+{% block content %}
+<h1>Privacy policy</h1>
+<p>Last updated {{ updated }}</p>
+
+<div class="card policy">
+  <h2>Who we are</h2>
+  <p>{{ app_name }} is a helpdesk run by {{ business }}. IT providers use it to look after the
+    computers and accounts of the businesses they support. This policy covers the {{ app_name }}
+    website and the {{ app_name }} app on Google Play, which shows the same website.</p>
+  <p>When an IT provider uses {{ app_name }} for their clients, that IT provider decides what
+    information goes in and is responsible for it. We store and process it for them.</p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><strong>Technician accounts:</strong> name, email address and a password. We store
+      passwords in a scrambled form that cannot be read back.</li>
+    <li><strong>People asking for help:</strong> name, work email address and, if their IT provider
+      adds it, a WhatsApp number and job title.</li>
+    <li><strong>Requests:</strong> what people write when asking for help, the replies, and when
+      each request was opened and closed. Passwords and card-like numbers typed into a request are
+      removed before it is saved.</li>
+    <li><strong>Equipment:</strong> device names, serial numbers, warranty dates and who uses them,
+      when an IT provider records them.</li>
+    <li><strong>On your device:</strong> a sign-in cookie that keeps you signed in, and your choice
+      of light or dark mode. We do not use advertising or tracking cookies.</li>
+  </ul>
+
+  <h2>What we use it for</h2>
+  <p>Only to run the helpdesk: to receive requests, answer them, show technicians who needs help
+    and with what, and keep records the IT provider can look back on or download. We do not sell
+    information, show adverts, or use it to build profiles of people.</p>
+
+  <h2>Who else handles it</h2>
+  <ul>
+    <li><strong>DigitalOcean</strong> hosts the servers where the information is stored.</li>
+    <li><strong>The IT provider's email service</strong>, if they turn on requests by email.</li>
+    <li><strong>Meta (WhatsApp)</strong>, if the IT provider turns on WhatsApp. Messages then also
+      follow WhatsApp's own terms.</li>
+    <li><strong>Anthropic</strong>, only if the IT provider turns on AI-written answers. The text of
+      a request and the relevant how-to guides are sent to write a suggested answer. Names, email
+      addresses and device details are not sent.</li>
+  </ul>
+  <p>We share information with anyone else only if the law requires it.</p>
+
+  <h2>How long we keep it</h2>
+  <p>Information is kept while the IT provider's account is open. When an IT provider deletes a
+    client company, its requests, people, devices and guides are removed straight away. Backup
+    copies are kept for {{ keep_days }} days and then deleted.</p>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li>IT providers can download all information about a client company at any time, and delete it.</li>
+    <li>If you asked for help through your employer's IT provider, contact them first: they control
+      your information. You can also contact us and we will pass your request on or help directly.</li>
+    <li>You can ask us for a copy of your information, to correct it, or to delete it.</li>
+  </ul>
+
+  <h2>Keeping it safe</h2>
+  <p>All connections use encryption (HTTPS). Each IT provider's information is kept separate from
+    every other's. Access to the servers is limited to the people who maintain {{ app_name }}.</p>
+
+  <h2>Children</h2>
+  <p>{{ app_name }} is a tool for businesses and is not meant for anyone under 16.</p>
+
+  <h2>Changes</h2>
+  <p>If we change this policy we will update the date at the top of this page.</p>
+
+  <h2>Contact</h2>
+  <p>Questions or requests about your information: <a href="mailto:{{ contact }}">{{ contact }}</a></p>
+</div>
+{% endblock %}

@@ -1,0 +1,4 @@
+# Keep Linux line endings everywhere: the server scripts in deploy/ stop
+# working if Windows line endings get into them.
+* text=auto eol=lf
+*.png binary
