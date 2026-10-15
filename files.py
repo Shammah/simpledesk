@@ -65,6 +65,39 @@ def save_uploads(conn, ticket_id, message_id, uploads):
     return problems
 
 
+PICTURE_MB = 2
+
+
+def save_picture(upload, old=""):
+    """Store a profile photo or company logo. Returns (stored_name, problem)."""
+    content = upload.read(PICTURE_MB * 1024 * 1024 + 1) if upload and upload.filename else b""
+    if not content:
+        return old, "Choose a picture first."
+    if len(content) > PICTURE_MB * 1024 * 1024:
+        return old, f"That picture is larger than {PICTURE_MB} MB."
+    kind = detect(content)
+    if not kind or not kind[1].startswith("image/"):
+        return old, "Use a PNG, JPEG, GIF or WebP picture."
+    config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored = f"pic-{secrets.token_hex(12)}.{kind[0]}"
+    (config.UPLOAD_DIR / stored).write_bytes(content)
+    remove_picture(old)
+    return stored, ""
+
+
+def remove_picture(stored):
+    if stored and "/" not in stored and "\\" not in stored:
+        try:
+            (config.UPLOAD_DIR / stored).unlink()
+        except OSError:
+            pass
+
+
+def picture_type(stored):
+    return {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif",
+            "webp": "image/webp"}.get(stored.rsplit(".", 1)[-1], "application/octet-stream")
+
+
 def path(row):
     return config.UPLOAD_DIR / row["stored_name"]
 
@@ -78,7 +111,10 @@ def by_message(conn, ticket_id):
 
 
 def remove_for_company(conn, company_id):
-    """Delete the stored files of a company that is being deleted."""
+    """Delete the stored files (and logo) of a company that is being deleted."""
+    logo = conn.execute("SELECT logo FROM companies WHERE id = ?", (company_id,)).fetchone()
+    if logo:
+        remove_picture(logo["logo"])
     for row in conn.execute("SELECT a.stored_name FROM attachments a JOIN tickets t ON t.id = a.ticket_id"
                             " WHERE t.company_id = ?", (company_id,)).fetchall():
         try:

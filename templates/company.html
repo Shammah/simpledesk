@@ -35,6 +35,21 @@
 </div>
 
 <div class="card">
+  <h2>Logo</h2>
+  <div class="row" style="align-items:center">
+    {% from "_ui.html" import avatar %}
+    <div class="fit">{{ avatar(c.name, url_for('company_logo', company_id=c.id) if c.logo else None, 'lg') }}</div>
+    <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" enctype="multipart/form-data" class="row">
+      {{ csrf() }}<input type="hidden" name="action" value="logo">
+      <div><label for="logo">{{ 'Change' if c.logo else 'Add' }} their logo</label><input type="file" id="logo" name="logo" accept="image/png,image/jpeg,image/gif,image/webp" required></div>
+      <button class="btn ghost fit">Upload</button>
+    </form>
+    {% if c.logo %}<form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" class="fit">{{ csrf() }}<button class="link" name="action" value="remove_logo">Remove logo</button></form>{% endif %}
+  </div>
+  <p class="small muted" style="margin:8px 0 0">Shown on their help page, so their staff recognise it. PNG or JPEG, up to 2 MB.</p>
+</div>
+
+<div class="card">
   <h2>Requests by email</h2>
   <p class="muted small">Emails from people listed below are matched to {{ c.name }} automatically. To also accept anyone writing from the company's own email domain, enter it here. Leave it empty for shared domains like gmail.com.</p>
   <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" class="row">

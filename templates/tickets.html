@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import avatar, ring %}
 {% block title %}Tickets - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Tickets</h1></div>
@@ -22,18 +23,24 @@
     {% for t in tickets %}
     <tr>
       <td class="muted">{{ t.id }}</td>
-      <td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a><br><span class="muted small">{{ t.requester_name }}</span></td>
+      <td><div class="who-cell">{{ avatar(t.requester_name, size='sm') }}<div><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a><br><span class="muted small">{{ t.requester_name }}</span></div></div></td>
       <td>{{ t.company_name }}</td>
       <td class="small">{{ t.category }}{% if t.channel != 'web' %}<br><span class="tag">{{ 'WhatsApp' if t.channel == 'whatsapp' else 'Email' }}</span>{% endif %}</td>
       <td><span class="tag {{ t.status }}">{{ status_labels[t.status] }}</span>
         {% if t.priority != 'normal' %}<span class="tag prio-{{ t.priority }}">{{ priorities[t.priority].label }}</span>{% endif %}
-        {% set due = due_label(t) %}{% if due %}<br><span class="small {{ 'late' if due.startswith('Late') else 'muted' }}">{{ due }}</span>{% endif %}
+        {% set due = due_label(t) %}{% if due %}<br><span class="due small {{ 'late' if due.startswith('Late') else 'muted' }}">{{ ring(t) }}{{ due }}</span>{% endif %}
         {% if t.resolved_by %}<span class="small muted">by {{ 'AI' if t.resolved_by == 'ai' else 'technician' }}</span>{% endif %}</td>
       <td class="small">{{ t.tech_name or '' }}</td>
       <td class="small muted">{{ t.created_at|ago }}</td>
     </tr>
     {% endfor %}
   </table></div>
+  {% elif status == 'open' %}
+  <div class="inbox-zero" data-inbox-zero>
+    <div class="iz-art" aria-hidden="true">🎉</div>
+    <h3>Inbox zero</h3>
+    <p class="muted">Nothing needs a technician right now.</p>
+  </div>
   {% else %}<p class="muted">No tickets here.</p>{% endif %}
 </div>
 {% endblock %}

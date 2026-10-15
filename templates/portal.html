@@ -2,15 +2,22 @@
 {% block title %}IT help - {{ c.name }}{% endblock %}
 {% block wrap %}public{% endblock %}
 {% block content %}
-<h1>IT help for {{ c.name }}</h1>
-<p class="muted">Tell us what is wrong. You will get an answer straight away, and a technician if you need one.</p>
+<div class="portal-hero">
+  {% if c.logo %}<img class="portal-logo" src="{{ url_for('portal_logo', token=c.portal_token) }}" alt="{{ c.name }}">{% endif %}
+  <h1>Hi! What can we help with? <span class="wave" aria-hidden="true">👋</span></h1>
+  <p class="hero-sub">Get an answer straight away, and a technician if you need one.</p>
+</div>
 <form method="post" class="card" enctype="multipart/form-data">
   {{ csrf() }}
-  <div class="row">
-    <div><label for="name">Your name</label><input type="text" id="name" name="name" required></div>
-    <div><label for="email">Work email</label><input type="email" id="email" name="email" required></div>
-  </div>
-  <div class="field" style="margin-top:12px"><label for="problem">What is the problem?</label>
+  <fieldset class="field choice">
+    <legend>What's it about?</legend>
+    <div class="topics">
+      {% for icon, label, start in topics %}
+      <button type="button" class="topic" data-start="{{ start }}"><span aria-hidden="true">{{ icon }}</span>{{ label }}</button>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <div class="field"><label for="problem">Tell us what's happening</label>
     <textarea id="problem" name="problem" required maxlength="6000" placeholder="For example: I cannot print to the office printer since this morning. It says 'offline'."></textarea></div>
   <fieldset class="field choice">
     <legend>How much is it stopping your work?</legend>
@@ -18,7 +25,11 @@
     <label class="check"><input type="radio" name="urgency" value="normal" checked> It's slowing me down</label>
     <label class="check"><input type="radio" name="urgency" value="low"> It's a question, no rush</label>
   </fieldset>
-  <div class="field"><label for="files">Screenshot or photo of the problem (optional)</label>
+  <div class="row">
+    <div><label for="name">Your name</label><input type="text" id="name" name="name" required autocomplete="name"></div>
+    <div><label for="email">Work email</label><input type="email" id="email" name="email" required autocomplete="email"></div>
+  </div>
+  <div class="field" style="margin-top:12px"><label for="files">Screenshot or photo of the problem (optional)</label>
     <input type="file" id="files" name="files" accept="{{ file_accept }}" multiple>
     <span class="small muted">Up to {{ max_files }} pictures or PDFs, {{ max_file_mb }} MB each.</span></div>
   <p class="small muted">Please do not include passwords. We will never ask for them.</p>

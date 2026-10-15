@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import avatar %}
 {% block title %}Companies - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Companies</h1><p class="muted">The clients you look after. Each one's data is kept separate.</p></div></div>
@@ -7,18 +8,21 @@
   <div><label for="name">Add a client company</label><input type="text" id="name" name="name" placeholder="Company name" required></div>
   <button class="btn fit">Add company</button>
 </form>
-<div class="card">
-  {% if companies %}
-  <div class="scroll"><table>
-    <tr><th>Company</th><th>People</th><th>Devices</th><th>Waiting for technician</th><th>AI first reply</th></tr>
-    {% for c in companies %}
-    <tr>
-      <td><a href="{{ url_for('company', company_id=c.id) }}">{{ c.name }}</a></td>
-      <td>{{ c.people }}</td><td>{{ c.devices }}</td><td>{{ c.open }}</td>
-      <td><span class="tag {{ 'good' if c.ai_enabled }}">{{ 'On' if c.ai_enabled else 'Off' }}</span></td>
-    </tr>
-    {% endfor %}
-  </table></div>
-  {% else %}<p class="muted">No companies yet. Add your first client above to get their help link.</p>{% endif %}
+{% if companies %}
+<div class="health-grid">
+  {% for c in companies %}
+  {% set state, reasons = health[c.id] %}
+  <a class="health-card {{ state }}" href="{{ url_for('company', company_id=c.id) }}">
+    <div class="hc-top">
+      {{ avatar(c.name, url_for('company_logo', company_id=c.id) if c.logo else None, 'md') }}
+      <div class="hc-name"><strong>{{ c.name }}</strong>
+        <span class="small muted">{{ c.people }} {{ 'person' if c.people == 1 else 'people' }} · {{ c.devices }} device{{ 's' if c.devices != 1 }}</span></div>
+      <span class="health-dot" title="{{ {'good': 'All good', 'watch': 'Keep an eye on it', 'bad': 'Needs attention'}[state] }}"></span>
+    </div>
+    <div class="hc-why small">{{ reasons|join(' · ') }}</div>
+    <div class="hc-foot small muted">AI first reply {{ 'on' if c.ai_enabled else 'off' }}</div>
+  </a>
+  {% endfor %}
 </div>
+{% else %}<div class="card"><p class="muted">No companies yet. Add your first client above to get their help link.</p></div>{% endif %}
 {% endblock %}

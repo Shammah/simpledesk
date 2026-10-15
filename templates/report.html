@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import day_bars %}
 {% block title %}{{ c.name }} report, {{ label }} - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="head no-print">
@@ -35,6 +36,11 @@
     <div class="stat"><div class="n">{{ m.happy_rate ~ '%' if m.happy_rate is not none else '-' }}</div><div class="l">rated the help good{% if m.rated %} ({{ m.rated }} rating{{ 's' if m.rated != 1 }}){% endif %}</div></div>
     <div class="stat"><div class="n">{{ minutes|hours }}</div><div class="l">technician time{% if included %}, of {{ included|hours }} included{% if minutes > included %}: <strong>{{ (minutes - included)|hours }} extra</strong>{% endif %}{% endif %}</div></div>
   </div>
+
+  {% if m.total %}
+  <h2>Requests each day</h2>
+  {{ day_bars(days, days_max, 'Requests each day in ' ~ label) }}
+  {% endif %}
 
   {% if categories %}
   <h2>Most common problems</h2>

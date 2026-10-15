@@ -1,9 +1,12 @@
 {% extends "base.html" %}
+{% from "_ui.html" import avatar, ring, day_bars, week_line, gauge %}
 {% block title %}Dashboard - {{ app_name }}{% endblock %}
 {% block content %}
-<div class="head">
-  <div><h1>Dashboard</h1><p class="muted">How support is going across all your clients.</p></div>
-  <a class="btn" href="{{ url_for('tickets') }}">Open tickets ({{ all_time.open }})</a>
+<div class="head greeting">
+  <div><h1><span data-greeting>Hello</span>, {{ first_name }} <span class="wave" data-greeting-icon aria-hidden="true">👋</span></h1>
+    <p class="muted">{% if all_time.open %}{{ all_time.open }} ticket{{ 's' if all_time.open != 1 }} need{{ 's' if all_time.open == 1 }} you{% if all_time.late %}, <strong class="late">{{ all_time.late }} late</strong>{% endif %}.{% else %}Nothing is waiting for you. Enjoy the calm ☕{% endif %}
+      {% for icon, title, why in my_badges %}<span class="badge-chip" title="{{ why }}">{{ icon }} {{ title }}</span>{% endfor %}</p></div>
+  <a class="btn" href="{{ url_for('tickets') }}">Open tickets (<span data-live-open-count>{{ all_time.open }}</span>)</a>
 </div>
 
 <div class="grid">
@@ -12,15 +15,23 @@
     <div class="l">of resolved tickets solved without a technician</div>
   </div>
   <div class="stat"><div class="n">{{ all_time.hours_saved }}</div><div class="l">technician hours saved (all time)</div></div>
-  <div class="stat"><div class="n">{{ month.total }}</div><div class="l">tickets this month</div></div>
-  <div class="stat"><div class="n">{{ all_time.open }}</div><div class="l">waiting for a technician</div></div>
-  <div class="stat">
-    <div class="n">{{ (all_time.reply_minutes ~ ' min') if all_time.reply_minutes is not none else '-' }}</div>
-    <div class="l">average time to first reply</div>
-  </div>
-  <div class="stat"><div class="n">{{ month.on_time_rate ~ '%' if month.on_time_rate is not none else '-' }}</div><div class="l">replies within target this month{% if all_time.late %}, <strong class="late">{{ all_time.late }} late now</strong>{% endif %}</div></div>
-  <div class="stat"><div class="n">{{ all_time.happy_rate ~ '%' if all_time.happy_rate is not none else '-' }}</div><div class="l">rated the help good ({{ all_time.rated }} rating{{ 's' if all_time.rated != 1 }})</div></div>
+  <div class="stat streak"><div class="n">🔥 {{ streak }}</div><div class="l">day{{ 's' if streak != 1 }} in a row with no late reply</div></div>
+  <div class="stat"><div class="n">{{ month.on_time_rate ~ '%' if month.on_time_rate is not none else '-' }}</div><div class="l">replies within target this month</div></div>
   <div class="stat"><div class="n">{{ month.minutes|hours }}</div><div class="l">technician time logged this month</div></div>
+</div>
+
+<div class="card week">
+  <h2>This week</h2>
+  <div class="week-row">
+    <div><span class="big">{{ week.total }}</span> ticket{{ 's' if week.total != 1 }}</div>
+    <div><span class="big">{{ week.ai }}</span> solved instantly</div>
+    <div><span class="big">{{ week.hours_saved }}</span> hours saved</div>
+    <div><span class="big">{{ week.minutes|hours }}</span> on the job</div>
+  </div>
+  <p class="small muted" style="margin:10px 0 0">
+    {% if week.best %}🏆 Happiest client: <strong>{{ week.best.name }}</strong>{% endif %}
+    {% if week.busiest %}{{ ' · ' if week.best }}📈 Busiest: <strong>{{ week.busiest.name }}</strong> ({{ week.busiest.n }} ticket{{ 's' if week.busiest.n != 1 }}){% endif %}
+    {% if not week.total %}A quiet week so far.{% endif %}</p>
 </div>
 
 <div class="cols">
@@ -33,16 +44,39 @@
         {% for t in queue %}
         {% set due = due_label(t) %}
         <tr>
-          <td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a>
+          <td><div class="who-cell">{{ avatar(t.requester_name, size='sm') }}<div><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a>
             {% if t.priority != 'normal' %}<span class="tag prio-{{ t.priority }}">{{ priorities[t.priority].label }}</span>{% endif %}
-            <br><span class="muted small">{{ t.requester_name }}</span></td>
+            <br><span class="muted small">{{ t.requester_name }}</span></div></div></td>
           <td>{{ t.company_name }}</td>
           <td class="small">{{ t.escalation_reason }}</td>
-          <td class="small {{ 'late' if due.startswith('Late') else 'muted' }}">{{ due or ('opened ' ~ t.created_at|ago) }}</td>
+          <td class="small {{ 'late' if due.startswith('Late') else 'muted' }}"><span class="due">{{ ring(t) }}{{ due or ('opened ' ~ t.created_at|ago) }}</span></td>
         </tr>
         {% endfor %}
       </table></div>
-      {% else %}<p class="muted">Nothing waiting. </p>{% endif %}
+      {% else %}
+      <div class="inbox-zero" data-inbox-zero>
+        <div class="iz-art" aria-hidden="true">🎉</div>
+        <h3>Inbox zero</h3>
+        <p class="muted">Every request is answered. Your clients' staff are back to work.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Tickets, last 30 days</h2>
+      {{ day_bars(days, days_max) }}
+    </div>
+
+    <div class="half">
+      <div class="card">
+        <h2>Time to first reply</h2>
+        <p class="small muted">Average hours, by week. Lower is better.</p>
+        {{ week_line(reply_weeks) }}
+      </div>
+      <div class="card gauges">
+        {{ gauge(all_time.happy_rate, 'rated the help good (' ~ all_time.rated ~ ' rating' ~ ('s' if all_time.rated != 1 else '') ~ ')') }}
+        {{ gauge(month.on_time_rate, 'replies on time this month') }}
+      </div>
     </div>
 
     <div class="card">
@@ -63,6 +97,21 @@
   </div>
 
   <div>
+    <div class="card feed-card">
+      <h2>Happening now <span class="live-dot" title="Updates by itself"></span></h2>
+      <ul class="feed" data-feed>
+        {% for a in feed %}
+        <li class="feed-item kind-{{ a.kind }}">
+          {{ avatar(a.actor or a.company_name or app_name, size='sm') }}
+          <div><div>{% if a.ticket_id %}<a href="{{ url_for('ticket', ticket_id=a.ticket_id) }}">{{ a.text }}</a>{% else %}{{ a.text }}{% endif %}</div>
+            <span class="small muted">{{ a.created_at|ago }}</span></div>
+        </li>
+        {% else %}
+        <li class="muted small" data-feed-empty>Things your clients do will show up here as they happen.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
     <div class="card">
       <h2>Most common problems</h2>
       {% if categories %}

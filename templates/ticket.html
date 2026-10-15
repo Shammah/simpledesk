@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import avatar, ring %}
 {% block title %}#{{ t.id }} {{ t.subject }} - {{ app_name }}{% endblock %}
 {% macro file_list(items) %}
   {% if items %}<div class="files">{% for f in items %}
@@ -18,7 +19,7 @@
     <p><span class="tag {{ t.status }}">{{ status_labels[t.status] }}</span>
       {% if t.resolved_by %}<span class="small muted">by {{ 'AI, no technician needed' if t.resolved_by == 'ai' else 'a technician' }}</span>{% endif %}
       <span class="tag prio-{{ t.priority }}">{{ priorities[t.priority].label }}</span>
-      {% if due %}<span class="tag {{ 'bad' if due.startswith('Late') else '' }}">{{ due }}</span>{% endif %}
+      {% if due %}<span class="tag due {{ 'bad' if due.startswith('Late') else '' }}">{{ ring(t) }}{{ due }}</span>{% endif %}
       <span class="tag">{{ t.category }}</span>
       <span class="tag">Came in by {{ {'web': 'help link', 'email': 'email', 'whatsapp': 'WhatsApp'}[t.channel] }}</span></p>
   </div>
@@ -29,9 +30,12 @@
     {% if t.status == 'open' and t.escalation_reason %}
     <div class="note warn"><strong>Why this came to you:</strong> {{ t.escalation_reason }}</div>
     {% endif %}
+    <div id="thread" data-state="{{ url_for('ticket_state', ticket_id=t.id) }}" data-key="{{ last_message }}-{{ t.status }}">
     {% for m in messages %}
+    {% set who = team.get(m.author_name) if m.sender == 'tech' else None %}
     <div class="msg {{ m.sender }}">
-      <div class="by">{{ {'user': m.author_name, 'ai': m.author_name, 'tech': m.author_name ~ ' (technician)', 'system': 'Automatic message'}[m.sender] }} &middot; {{ m.created_at|ago }}</div>
+      <div class="by">{% if m.sender in ('user', 'tech') %}{{ avatar(m.author_name, url_for('tech_photo', tech_id=who.id) if who and who.photo else None, 'xs') }}{% endif %}
+        {{ {'user': m.author_name, 'ai': m.author_name, 'tech': m.author_name ~ ' (technician)', 'system': 'Automatic message'}[m.sender] }} &middot; {{ m.created_at|ago }}</div>
       <div class="body">{{ m.body }}</div>
       {{ file_list(attached.get(m.id)) }}
       {% if m.delivery.startswith('failed') %}<div class="small" style="color:var(--bad);margin-top:6px">Not delivered: {{ m.delivery[8:] }}</div>
@@ -42,6 +46,8 @@
     {% if t.rating %}
     <div class="note"><strong>{{ {3: '😀 Rated good', 2: '😐 Rated okay', 1: '🙁 Rated not good'}[t.rating] }}</strong>{% if t.rating_note %}: “{{ t.rating_note }}”{% endif %}</div>
     {% endif %}
+    </div>
+    <div class="typing" data-typing hidden><span class="dots"><i></i><i></i><i></i></span><span><span data-typing-name></span> is typing…</span></div>
 
     {% if t.status != 'resolved' %}
     <form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card" enctype="multipart/form-data">
@@ -56,7 +62,7 @@
           </select>
           {% endif %}
         </div>
-        <textarea id="body" name="body" placeholder="Write the fix in plain steps. The person gets this {{ {'web': 'on their help page, and by email if email is set up', 'email': 'by email', 'whatsapp': 'on WhatsApp'}[t.channel] }}."></textarea></div>
+        <textarea id="body" name="body" data-typing-url="{{ url_for('ticket_typing', ticket_id=t.id) }}" placeholder="Write the fix in plain steps. The person gets this {{ {'web': 'on their help page, and by email if email is set up', 'email': 'by email', 'whatsapp': 'on WhatsApp'}[t.channel] }}."></textarea></div>
       <div class="row" style="margin-bottom:12px">
         <div><label for="files">Attach pictures or PDFs</label><input type="file" id="files" name="files" accept="{{ file_accept }}" multiple></div>
         <div style="max-width:150px"><label for="minutes">Time spent (minutes)</label><input type="number" id="minutes" name="minutes" min="1" max="1440" inputmode="numeric"></div>

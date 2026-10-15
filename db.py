@@ -167,6 +167,14 @@ MIGRATIONS = [
     ("companies", "report_auto", "INTEGER NOT NULL DEFAULT 0"),
     ("companies", "last_report", "TEXT NOT NULL DEFAULT ''"),      # 'YYYY-MM' last sent automatically
     ("companies", "monthly_hours", "REAL NOT NULL DEFAULT 0"),     # hours included in their contract; 0 = not set
+    # Pictures: stored file names in data/uploads ('' = show initials instead)
+    ("technicians", "photo", "TEXT NOT NULL DEFAULT ''"),
+    ("companies", "logo", "TEXT NOT NULL DEFAULT ''"),
+    # Live conversation: when a technician last looked, and who is typing right now
+    ("tickets", "tech_seen_at", "TEXT"),
+    ("tickets", "tech_typing_until", "TEXT"),
+    ("tickets", "tech_typing_name", "TEXT NOT NULL DEFAULT ''"),
+    ("tickets", "user_typing_until", "TEXT"),
 ]
 
 # Tables added after the first version.
@@ -218,10 +226,46 @@ CREATE TABLE IF NOT EXISTS saved_replies (
     title TEXT NOT NULL,
     body TEXT NOT NULL
 );
+-- What happened, newest last: feeds the dashboard and the live updates.
+CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+    ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,            -- new, needs_tech, ai, reply, tech_reply, resolved, rated, payment
+    actor TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity_provider ON activity(provider_id, id);
 CREATE INDEX IF NOT EXISTS idx_time_ticket ON time_entries(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_files_ticket ON attachments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_payments_provider ON payments(provider_id);
 """
+
+
+def backfill_activity(conn):
+    """Fill the activity feed from tickets that existed before it did."""
+    base = ("INSERT INTO activity (provider_id, company_id, ticket_id, kind, actor, text, created_at)"
+            " SELECT c.provider_id, t.company_id, t.id, {kind}, {actor}, {text}, {when}"
+            " FROM tickets t JOIN companies c ON c.id = t.company_id WHERE {where}")
+    conn.execute(base.format(kind="'new'", actor="t.requester_name",
+                             text="t.requester_name || ' at ' || c.name || ' asked: ' || t.subject",
+                             when="t.created_at", where="1"))
+    conn.execute(base.format(kind="'resolved'", actor="''",
+                             text="CASE WHEN t.resolved_by = 'ai' THEN 'Solved instantly, no technician needed: '"
+                                  " ELSE 'Resolved: ' END || t.subject",
+                             when="t.resolved_at", where="t.resolved_at IS NOT NULL"))
+    conn.execute(base.format(kind="'rated'", actor="t.requester_name",
+                             text="t.requester_name || ' rated the help ' || CASE t.rating WHEN 3 THEN '😀'"
+                                  " WHEN 2 THEN '😐' ELSE '🙁' END",
+                             when="COALESCE(t.resolved_at, t.created_at)", where="t.rating IS NOT NULL"))
+    # Keep the feed in time order.
+    conn.execute("CREATE TEMP TABLE a2 AS SELECT * FROM activity ORDER BY created_at, id")
+    conn.execute("DELETE FROM activity")
+    conn.execute("INSERT INTO activity (provider_id, company_id, ticket_id, kind, actor, text, created_at)"
+                 " SELECT provider_id, company_id, ticket_id, kind, actor, text, created_at FROM a2")
+    conn.execute("DROP TABLE a2")
 
 
 def init():
@@ -240,5 +284,7 @@ def init():
             if column == "delivery":
                 conn.execute("UPDATE messages SET delivery = 'n/a'")
     conn.executescript(LATER_TABLES)
+    if not conn.execute("SELECT 1 FROM activity LIMIT 1").fetchone():
+        backfill_activity(conn)
     conn.commit()
     conn.close()

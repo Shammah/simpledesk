@@ -1,0 +1,71 @@
+{# Small building blocks shared by several pages. #}
+
+{# A round picture, or coloured initials when there is no picture. #}
+{% macro avatar(name, src=None, size="md") -%}
+  {%- if src -%}<img class="avatar {{ size }}" src="{{ src }}" alt="" loading="lazy">
+  {%- else -%}<span class="avatar {{ size }}" style="--h: {{ name|hue }}" aria-hidden="true">{{ name|initials }}</span>{%- endif -%}
+{%- endmacro %}
+
+{# A ring that empties as the reply deadline gets closer, then turns red. #}
+{% macro ring(t) -%}
+  {%- if t.status == 'open' and t.due_at and t.target_met is none and t.waiting_since -%}
+  <span class="ring" data-start="{{ t.waiting_since|iso }}" data-due="{{ t.due_at|iso }}" aria-hidden="true">
+    <svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="15"/><circle class="fill" cx="18" cy="18" r="15" pathLength="100"/></svg>
+  </span>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Bars per day: solved instantly (teal) on top of the rest (indigo). #}
+{% macro day_bars(days, top, label="Tickets per day") -%}
+  {% set w = 640 %}{% set h = 150 %}{% set bw = w / days|length %}
+  <figure class="chart">
+    <svg viewBox="0 0 {{ w }} {{ h + 22 }}" role="img" aria-label="{{ label }}">
+      {% for line in [0.25, 0.5, 0.75, 1] %}<line class="grid" x1="0" x2="{{ w }}" y1="{{ h - h * line }}" y2="{{ h - h * line }}"/>{% endfor %}
+      {% for d in days %}
+        {% set x = loop.index0 * bw + bw * 0.18 %}{% set full = (h - 6) * d.total / top %}{% set aih = (h - 6) * d.ai / top %}
+        <g class="bar-group"><title>{{ d.label }}: {{ d.total }} ticket{{ 's' if d.total != 1 }}{% if d.ai %}, {{ d.ai }} solved instantly{% endif %}</title>
+          <rect class="hit" x="{{ loop.index0 * bw }}" y="0" width="{{ bw }}" height="{{ h }}"/>
+          {% if d.total %}<rect class="b-all" x="{{ x }}" y="{{ h - full }}" width="{{ bw * 0.64 }}" height="{{ full }}" rx="3" style="--i: {{ loop.index0 }}"/>{% endif %}
+          {% if d.ai %}<rect class="b-ai" x="{{ x }}" y="{{ h - aih }}" width="{{ bw * 0.64 }}" height="{{ aih }}" rx="3" style="--i: {{ loop.index0 }}"/>{% endif %}
+        </g>
+        {% if (days|length - 1 - loop.index0) % 7 == 0 %}<text x="{{ x + bw * 0.32 }}" y="{{ h + 16 }}" text-anchor="middle">{{ d.label }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+    <figcaption><span class="key all"></span>Tickets <span class="key ai"></span>Solved instantly</figcaption>
+  </figure>
+{%- endmacro %}
+
+{# A line of weekly values (gaps where a week had none). #}
+{% macro week_line(points, unit="h") -%}
+  {% set vals = points|selectattr('hours', 'ne', none)|map(attribute='hours')|list %}
+  {% if vals %}
+  {% set top = [vals|max, 1]|max %}{% set w = 640 %}{% set h = 120 %}{% set step = w / (points|length - 1) %}
+  <figure class="chart">
+    <svg viewBox="-10 -10 {{ w + 20 }} {{ h + 34 }}" role="img" aria-label="Average hours to first reply, by week">
+      <line class="grid" x1="0" x2="{{ w }}" y1="{{ h }}" y2="{{ h }}"/>
+      {% set ns = namespace(d='') %}
+      {% for p in points %}{% if p.hours is not none %}
+        {% set ns.d = ns.d ~ ('M' if not ns.d else ' L') ~ (loop.index0 * step)|round(1) ~ ',' ~ (h - (h - 8) * p.hours / top)|round(1) %}
+      {% endif %}{% endfor %}
+      <path class="line" d="{{ ns.d }}" pathLength="100"/>
+      {% for p in points %}
+        {% if p.hours is not none %}<circle class="dot" cx="{{ loop.index0 * step }}" cy="{{ h - (h - 8) * p.hours / top }}" r="5"><title>Week of {{ p.label }}: {{ p.text }}</title></circle>
+          <text class="val" x="{{ loop.index0 * step }}" y="{{ h - (h - 8) * p.hours / top - 12 }}" text-anchor="middle">{{ p.text }}</text>{% endif %}
+        <text x="{{ loop.index0 * step }}" y="{{ h + 20 }}" text-anchor="middle">{{ p.label }}</text>
+      {% endfor %}
+    </svg>
+  </figure>
+  {% else %}<p class="muted small">No technician replies yet.</p>{% endif %}
+{%- endmacro %}
+
+{# Half-circle gauge for a percentage. #}
+{% macro gauge(pct, label) -%}
+  <figure class="gauge" style="--p: {{ pct or 0 }}">
+    <svg viewBox="0 0 120 70" role="img" aria-label="{{ label }}: {{ pct ~ '%' if pct is not none else 'no data yet' }}">
+      <path class="g-track" d="M10,60 A50,50 0 0 1 110,60" pathLength="100"/>
+      <path class="g-fill" d="M10,60 A50,50 0 0 1 110,60" pathLength="100"/>
+    </svg>
+    <div class="g-num">{{ pct ~ '%' if pct is not none else '–' }}</div>
+    <figcaption>{{ label }}</figcaption>
+  </figure>
+{%- endmacro %}

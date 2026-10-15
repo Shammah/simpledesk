@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import avatar %}
 {% block title %}Team & plan - {{ app_name }}{% endblock %}
 {% block content %}
 {% set owner = g.tech.role == 'owner' %}
@@ -90,7 +91,8 @@
   <div class="scroll"><table>
     <tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
     {% for t in techs %}
-    <tr><td>{{ t.name }}</td><td>{{ t.email }}</td>
+    <tr><td><div class="who-cell">{{ avatar(t.name, url_for('tech_photo', tech_id=t.id) if t.photo else None, 'sm') }}<div>{{ t.name }}
+      {% for icon, title, why in badges.get(t.id, []) %}<br><span class="badge-chip" title="{{ why }}">{{ icon }} {{ title }}</span>{% endfor %}</div></div></td><td>{{ t.email }}</td>
       <td>{{ 'Owner' if t.role == 'owner' else 'Technician' }}{% if not t.password_hash %} <span class="tag open">Invited</span>{% endif %}</td>
       <td>{% if owner and t.id != g.tech.id %}
         <div class="row" style="gap:12px">
@@ -115,6 +117,20 @@
     <p class="small muted" style="margin-top:8px">They get an email with a link to choose their own password.{% if not g.android and bill.plan_key == 'pro' %} Each technician adds {{ price|money }} a month from your next renewal.{% endif %}</p>
   </form>
   {% endif %}
+</div>
+
+<div class="card">
+  <h2>Your photo</h2>
+  <div class="row" style="align-items:center">
+    <div class="fit">{{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'lg') }}</div>
+    <form method="post" enctype="multipart/form-data" class="row">
+      {{ csrf() }}<input type="hidden" name="action" value="my_photo">
+      <div><label for="photo">{{ 'Change' if g.tech.photo else 'Add' }} your photo</label><input type="file" id="photo" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required></div>
+      <button class="btn ghost fit">Upload</button>
+    </form>
+    {% if g.tech.photo %}<form method="post" class="fit">{{ csrf() }}<button class="link" name="action" value="remove_photo">Remove photo</button></form>{% endif %}
+  </div>
+  <p class="small muted" style="margin:8px 0 0">Your team sees it next to your replies and in the menu.{% if badges|length > 1 %} Badges are earned each month: ⚡ fastest reply, 🏁 most resolved, 🌟 most 😀 ratings, ⏱ every reply on time.{% endif %}</p>
 </div>
 
 <div class="half">

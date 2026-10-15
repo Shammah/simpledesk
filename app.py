@@ -16,7 +16,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from flask import (Flask, abort, flash, g, redirect, render_template, request,
+from flask import (Flask, abort, flash, g, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
 from markupsafe import Markup
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -27,6 +27,7 @@ import channels
 import config
 import db
 import files
+import insights
 import monitoring
 import payments
 
@@ -167,7 +168,35 @@ def ago(value):
             return f"{n} {unit}{'s' if n != 1 else ''} ago"
 
 
-app.jinja_env.filters.update(ago=ago, money=money, hours=hours)
+def hue(name):
+    """A steady colour for someone's initials circle, from their name."""
+    return int(hashlib.md5((name or "?").encode()).hexdigest()[:4], 16) % 360
+
+
+def initials(name):
+    parts = [p for p in (name or "?").replace("Dr.", "").split() if p[:1].isalnum()]
+    return ("".join(p[0] for p in parts[:2]) or "?").upper()
+
+
+def iso(value):
+    """Database time -> ISO with Z, for the page's own clock (countdown rings)."""
+    return value.replace(" ", "T") + "Z" if value else ""
+
+
+@app.context_processor
+def live_numbers():
+    """For the menu badge and live updates on every signed-in page."""
+    if not g.get("tech") or not g.get("provider"):
+        return {}
+    row = g.db.execute(
+        "SELECT (SELECT COUNT(*) FROM tickets t JOIN companies c ON c.id = t.company_id"
+        "  WHERE c.provider_id = ? AND t.status = 'open'),"
+        " (SELECT COALESCE(MAX(id), 0) FROM activity WHERE provider_id = ?)",
+        (g.provider["id"], g.provider["id"])).fetchone()
+    return dict(nav_open=row[0], last_activity=row[1])
+
+
+app.jinja_env.filters.update(ago=ago, money=money, hours=hours, hue=hue, initials=initials, iso=iso)
 app.jinja_env.globals.update(csrf=csrf_field, csrf_token=csrf_token, app_name=config.APP_NAME,
                              currency=config.CURRENCY, priorities=config.PRIORITIES,
                              due_label=due_label, file_accept=files.ACCEPT,
@@ -285,6 +314,8 @@ def apply_payment(reference, tx):
         " card_label = CASE WHEN ? != '' THEN ? ELSE card_label END WHERE id = ?",
         (fmt_time(until), email, card or "", card or "", card and payments.describe(tx) or "",
          card and payments.describe(tx) or "", provider["id"]))
+    log_activity("payment", f"Payment received: {money(pay['amount'])}, Team plan until {until:%d %b %Y}",
+                 provider_id=provider["id"])
     g.db.commit()
     return pay
 
@@ -572,11 +603,21 @@ def dashboard():
         " WHERE c.provider_id = ? AND t.status = 'open'"
         " ORDER BY t.target_met IS NOT NULL, t.due_at IS NULL, t.due_at, t.created_at LIMIT 8",
         (pid,)).fetchall()
-    return render_template("dashboard.html", all_time=metrics(pid),
+    feed = g.db.execute(
+        "SELECT a.*, c.name AS company_name FROM activity a LEFT JOIN companies c ON c.id = a.company_id"
+        " WHERE a.provider_id = ? ORDER BY a.id DESC LIMIT 12", (pid,)).fetchall()
+    all_time = metrics(pid)
+    days = insights.daily(g.db, pid, 30)
+    return render_template("dashboard.html", all_time=all_time,
                            month=metrics(pid, since=month_start()),
                            by_company=by_company, categories=categories,
                            warranties=warranties, queue=queue, bill=billing(g.provider),
-                           today=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                           today=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                           feed=feed, days=days, days_max=max([d["total"] for d in days] + [1]),
+                           reply_weeks=insights.weekly_reply_hours(g.db, pid),
+                           week=insights.highlights(g.db, pid), streak=insights.streak(g.db, pid),
+                           my_badges=insights.badges(g.db, pid).get(g.tech["id"], []),
+                           first_name=g.tech["name"].split(" ")[0])
 
 
 # ---------------------------------------------------------------------------
@@ -633,7 +674,13 @@ def ticket(ticket_id):
                             (ticket_id,)).fetchall()
     replies = g.db.execute("SELECT * FROM saved_replies WHERE provider_id = ? ORDER BY title",
                            (g.provider["id"],)).fetchall()
-    return render_template("ticket.html", t=t, messages=msgs, person=person,
+    # The staff member sees "Seen by a technician" from now on.
+    g.db.execute("UPDATE tickets SET tech_seen_at = ? WHERE id = ?", (db.now(), ticket_id))
+    g.db.commit()
+    team = {x["name"]: x for x in g.db.execute(
+        "SELECT id, name, photo FROM technicians WHERE provider_id = ?", (g.provider["id"],))}
+    return render_template("ticket.html", t=t, messages=msgs, person=person, team=team,
+                           last_message=msgs[-1]["id"] if msgs else 0,
                            devices=devices, history=history, techs=techs,
                            attached=files.by_message(g.db, ticket_id), time_log=time_log,
                            time_total=sum(e["minutes"] for e in time_log), saved_replies=replies)
@@ -670,12 +717,18 @@ def ticket_reply(ticket_id):
             " status = CASE WHEN status = 'ai_answered' THEN 'open' ELSE status END WHERE id = ?",
             (db.now(), g.tech["id"], ticket_id))
         target_reached(ticket_id)
+        if not request.form.get("resolve"):
+            log_activity("tech_reply", f"{g.tech['name']} replied to {t['requester_name']}: {t['subject']}",
+                         t["company_id"], ticket_id, g.tech["name"])
+        g.db.execute("UPDATE tickets SET tech_typing_until = NULL WHERE id = ?", (ticket_id,))
     log_time(ticket_id, request.form.get("minutes", type=int))
     if request.form.get("resolve"):
         target_reached(ticket_id)
         g.db.execute(
             "UPDATE tickets SET status = 'resolved', resolved_by = 'human', resolved_at = ?"
             " WHERE id = ?", (db.now(), ticket_id))
+        log_activity("resolved", f"{g.tech['name']} resolved: {t['subject']}", t["company_id"], ticket_id,
+                     g.tech["name"])
         # Step 4 of the loop: the human fix becomes a guide the AI can use next time.
         title = request.form.get("guide_title", "").strip()
         if request.form.get("save_guide") and title and body:
@@ -683,9 +736,9 @@ def ticket_reply(ticket_id):
                 "INSERT INTO articles (provider_id, company_id, title, keywords, body, source, created_at)"
                 " VALUES (?, ?, ?, ?, ?, 'ticket', ?)",
                 (g.provider["id"], t["company_id"], title, t["subject"], body, db.now()))
-            flash("Ticket resolved and the fix was saved as a guide for this company.")
+            flash("Ticket resolved and the fix was saved as a guide for this company. 🎉", "celebrate")
         else:
-            flash("Ticket resolved.")
+            flash("Ticket resolved. Nice work! 🎉", "celebrate")
     g.db.commit()
     flush_outbox(ticket_id)
     return redirect(url_for("ticket", ticket_id=ticket_id))
@@ -724,6 +777,85 @@ def ticket_update(ticket_id):
                      (g.tech["id"], ticket_id))
     g.db.commit()
     return redirect(url_for("ticket", ticket_id=ticket_id))
+
+
+# ---- Live updates: the pages ask every few seconds what has changed ----
+
+def typing_until():
+    return fmt_time(utcnow() + timedelta(seconds=8))
+
+
+@app.route("/live")
+@login_required
+def live():
+    """New activity since the page last asked, and the counts for the menu badge."""
+    after = request.args.get("after", type=int) or 0
+    pid = g.provider["id"]
+    rows = g.db.execute(
+        "SELECT a.*, c.name AS company_name FROM activity a LEFT JOIN companies c ON c.id = a.company_id"
+        " WHERE a.provider_id = ? AND a.id > ? ORDER BY a.id DESC LIMIT 20", (pid, after)).fetchall() if after else []
+    last = g.db.execute("SELECT COALESCE(MAX(id), 0) FROM activity WHERE provider_id = ?", (pid,)).fetchone()[0]
+    counts = g.db.execute(
+        "SELECT SUM(t.status = 'open'), SUM(t.status = 'open' AND t.target_met IS NULL AND t.due_at < ?)"
+        " FROM tickets t JOIN companies c ON c.id = t.company_id WHERE c.provider_id = ?",
+        (db.now(), pid)).fetchone()
+    events = [dict(id=r["id"], kind=r["kind"], text=r["text"], actor=r["actor"], when=ago(r["created_at"]),
+                   company=r["company_name"] or "", hue=hue(r["actor"] or r["company_name"] or ""),
+                   initials=initials(r["actor"] or r["company_name"] or config.APP_NAME),
+                   url=url_for("ticket", ticket_id=r["ticket_id"]) if r["ticket_id"] else "")
+              for r in reversed(rows)]
+    return jsonify(last=last, events=events, open=counts[0] or 0, late=counts[1] or 0)
+
+
+@app.route("/tickets/<int:ticket_id>/state")
+@login_required
+def ticket_state(ticket_id):
+    t = own_ticket(ticket_id)
+    last = g.db.execute("SELECT COALESCE(MAX(id), 0) FROM messages WHERE ticket_id = ?", (ticket_id,)).fetchone()[0]
+    typing = bool(t["user_typing_until"] and t["user_typing_until"] > db.now())
+    return jsonify(key=f"{last}-{t['status']}", typing=t["requester_name"].split(" ")[0] if typing else "")
+
+
+@app.route("/tickets/<int:ticket_id>/typing", methods=["POST"])
+@login_required
+def ticket_typing(ticket_id):
+    own_ticket(ticket_id)
+    g.db.execute("UPDATE tickets SET tech_typing_until = ?, tech_typing_name = ? WHERE id = ?",
+                 (typing_until(), g.tech["name"].split(" ")[0], ticket_id))
+    g.db.commit()
+    return "", 204
+
+
+# ---- Profile photos and company logos ----
+
+def send_picture(stored):
+    if not stored or not (config.UPLOAD_DIR / stored).exists():
+        abort(404)
+    response = send_file(config.UPLOAD_DIR / stored, mimetype=files.picture_type(stored))
+    response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return response
+
+
+@app.route("/photos/<int:tech_id>")
+@login_required
+def tech_photo(tech_id):
+    row = g.db.execute("SELECT photo FROM technicians WHERE id = ? AND provider_id = ?",
+                       (tech_id, g.provider["id"])).fetchone()
+    return send_picture(row["photo"] if row else "")
+
+
+@app.route("/companies/<int:company_id>/logo")
+@login_required
+def company_logo(company_id):
+    return send_picture(own_company(company_id)["logo"])
+
+
+@app.route("/help/<token>/logo")
+def portal_logo(token):
+    row = g.db.execute("SELECT logo FROM companies WHERE portal_token = ?", (token,)).fetchone()
+    return send_picture(row["logo"] if row else "")
 
 
 @app.route("/files/<int:file_id>")
@@ -770,7 +902,8 @@ def companies():
         " (SELECT COUNT(*) FROM devices d WHERE d.company_id = c.id) AS devices,"
         " (SELECT COUNT(*) FROM tickets t WHERE t.company_id = c.id AND t.status = 'open') AS open"
         " FROM companies c WHERE c.provider_id = ? ORDER BY c.name", (g.provider["id"],)).fetchall()
-    return render_template("companies.html", companies=rows)
+    return render_template("companies.html", companies=rows,
+                           health={c["id"]: insights.health(g.db, c["id"]) for c in rows})
 
 
 @app.route("/companies/<int:company_id>")
@@ -857,6 +990,15 @@ def company_settings(company_id):
         domain = request.form.get("email_domain", "").strip().lower().lstrip("@")
         g.db.execute("UPDATE companies SET email_domain = ? WHERE id = ?", (domain, company_id))
         flash("Email domain saved.")
+    elif action in ("logo", "remove_logo"):
+        c = own_company(company_id)
+        if action == "logo":
+            stored, problem = files.save_picture(request.files.get("logo"), c["logo"])
+            flash(problem or "Logo updated. Their staff see it on the help page.")
+        else:
+            files.remove_picture(c["logo"])
+            stored = ""
+        g.db.execute("UPDATE companies SET logo = ? WHERE id = ?", (stored, company_id))
     elif action == "report":
         email = request.form.get("report_email", "").strip().lower()
         hours_included = request.form.get("monthly_hours", type=float) or 0
@@ -973,7 +1115,11 @@ def company_report(company_id):
     now = utcnow()
     months = [f"{(now.year * 12 + now.month - 1 - i) // 12:04d}-{(now.month - 1 - i) % 12 + 1:02d}"
               for i in range(13)]          # this month and the twelve before it
-    return render_template("report.html", months=months, **r)
+    start = parse_time(month_bounds(key)[0])
+    length = calendar.monthrange(start.year, start.month)[1]
+    days = insights.daily(g.db, c["provider_id"], length, company_id=c["id"], start=start)
+    return render_template("report.html", months=months, days=days,
+                           days_max=max([d["total"] for d in days] + [1]), **r)
 
 
 @app.route("/companies/<int:company_id>/delete", methods=["POST"])
@@ -1339,6 +1485,14 @@ def team():
                 g.db.commit()
                 sign_in(g.db.execute("SELECT * FROM technicians WHERE id = ?", (g.tech["id"],)).fetchone())
                 flash("Password changed. Other devices have been signed out.")
+        elif action in ("my_photo", "remove_photo"):
+            if action == "my_photo":
+                stored, problem = files.save_picture(request.files.get("photo"), g.tech["photo"])
+                flash(problem or "Photo updated.")
+            else:
+                files.remove_picture(g.tech["photo"])
+                stored = ""
+            g.db.execute("UPDATE technicians SET photo = ? WHERE id = ?", (stored, g.tech["id"]))
         elif g.tech["role"] != "owner":
             abort(403)
         elif action == "add":
@@ -1381,6 +1535,7 @@ def team():
     history = g.db.execute("SELECT * FROM payments WHERE provider_id = ? AND status = 'paid'"
                            " ORDER BY id DESC LIMIT 12", (pid,)).fetchall()
     return render_template("team.html", techs=techs, bill=bill, plans=config.PLANS, history=history,
+                           badges=insights.badges(g.db, pid),
                            payments_ready=bool(payments.settings()),
                            grace_days=config.PAYMENT_GRACE_DAYS)
 
@@ -1556,12 +1711,26 @@ def run_ai(ticket_row, company_row):
                  (result["category"], db.now(), tid))
     g.db.execute("INSERT INTO ai_usage (provider_id, ticket_id, engine, created_at) VALUES (?, ?, ?, ?)",
                  (provider["id"], tid, result["engine"], db.now()))
+    log_activity("ai", f"Answered instantly: {ticket_row['subject']}", company_row["id"], tid,
+                 provider_id=provider["id"])
 
 
 
 # ---------------------------------------------------------------------------
 # What staff can do, whichever way they reach us (help page, email, WhatsApp)
 # ---------------------------------------------------------------------------
+
+def log_activity(kind, text, company_id=None, ticket_id=None, actor="", provider_id=None):
+    """Add a line to the activity feed (and so to everyone's live updates)."""
+    if provider_id is None:
+        provider_id = g.db.execute("SELECT provider_id FROM companies WHERE id = ?", (company_id,)).fetchone()[0]
+    g.db.execute("INSERT INTO activity (provider_id, company_id, ticket_id, kind, actor, text, created_at)"
+                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 (provider_id, company_id, ticket_id, kind, actor, text[:300], db.now()))
+
+
+RATING_FACES = {3: "😀", 2: "😐", 1: "🙁"}
+
 
 def set_due(ticket_id):
     """Work out when a technician's reply is due, from the ticket's priority."""
@@ -1624,9 +1793,15 @@ def finish_staff_turn(ticket_id, before, wrote=True):
         g.db.execute("UPDATE tickets SET waiting_since = ?, target_met = NULL, late_alerted = 0"
                      " WHERE id = ?", (db.now(), ticket_id))
         set_due(ticket_id)
+        urgent = "🔴 " if t["priority"] == "urgent" else ""
+        log_activity("needs_tech", f"{urgent}{t['subject']} needs a technician", t["company_id"], ticket_id,
+                     t["requester_name"])
         g.db.commit()
         notify_techs(ticket_id, "needs_tech")
     elif wrote:
+        log_activity("reply", f"{t['requester_name']} replied: {t['subject']}", t["company_id"], ticket_id,
+                     t["requester_name"])
+        g.db.commit()
         notify_techs(ticket_id, "reply")
 
 
@@ -1656,6 +1831,7 @@ def open_ticket(c, name, email, problem, channel="web", person=None, subject="",
          priority if priority in config.PRIORITIES else "normal", db.now()))
     g.db.execute("INSERT INTO messages (ticket_id, sender, author_name, body, delivery, created_at)"
                  " VALUES (?, 'user', ?, ?, 'n/a', ?)", (cur.lastrowid, name, problem, db.now()))
+    log_activity("new", f"{name} at {c['name']} asked: {subject}", c["id"], cur.lastrowid, name)
     t = g.db.execute("SELECT * FROM tickets WHERE id = ?", (cur.lastrowid,)).fetchone()
     run_ai(t, c)
     return t
@@ -1696,6 +1872,9 @@ def staff_marks(t, action):
         by = "ai" if t["status"] == "ai_answered" else "human"
         g.db.execute("UPDATE tickets SET status = 'resolved', resolved_by = ?, resolved_at = ?"
                      " WHERE id = ?", (by, db.now(), t["id"]))
+        log_activity("resolved", ("Solved instantly, no technician needed: " if by == "ai"
+                                  else f"{t['requester_name']} confirmed it's fixed: ") + t["subject"],
+                     t["company_id"], t["id"], t["requester_name"])
         if t["channel"] != "web":
             note("Glad that is sorted. This request is now closed.")
     elif action == "human" and t["status"] == "ai_answered":
@@ -2083,8 +2262,16 @@ def portal(token):
         g.db.commit()
         finish_staff_turn(t["id"], None)
         flush_outbox(t["id"])
-        return redirect(url_for("portal_ticket", public_token=t["public_token"]))
-    return render_template("portal.html", c=c, public=True)
+        return redirect(url_for("portal_ticket", public_token=t["public_token"], sent=1))
+    return render_template("portal.html", c=c, public=True, topics=HELP_TOPICS)
+
+
+# Quick-pick buttons on the help page: (emoji, label, words to start the description)
+HELP_TOPICS = [
+    ("🖨", "Printer", "The printer "), ("📶", "Internet", "The internet "), ("🔑", "Password", "I can't sign in to "),
+    ("✉️", "Email", "My email "), ("💻", "Laptop", "My computer "), ("📱", "Phone", "My phone "),
+    ("🧩", "Software", "I need help with the program "), ("💬", "Something else", ""),
+]
 
 
 @app.route("/help/t/<public_token>", methods=["GET", "POST"])
@@ -2109,14 +2296,42 @@ def portal_ticket(public_token):
             if rating in (1, 2, 3):
                 g.db.execute("UPDATE tickets SET rating = ?, rating_note = ? WHERE id = ?",
                              (rating, ai.redact(request.form.get("note", "").strip()[:1000]), t["id"]))
+                if not t["rating"]:
+                    log_activity("rated", f"{t['requester_name']} rated the help {RATING_FACES[rating]}",
+                                 t["company_id"], t["id"], t["requester_name"])
                 flash("Thank you for letting us know.")
         g.db.commit()
         finish_staff_turn(t["id"], t["status"], wrote)
         flush_outbox(t["id"])
         return redirect(url_for("portal_ticket", public_token=public_token))
     msgs = g.db.execute("SELECT * FROM messages WHERE ticket_id = ? ORDER BY id", (t["id"],)).fetchall()
-    return render_template("portal_ticket.html", t=t, c=c, messages=msgs, public=True,
+    last_user = max((m["created_at"] for m in msgs if m["sender"] == "user"), default="")
+    seen = bool(t["tech_seen_at"] and t["tech_seen_at"] >= last_user and t["status"] == "open")
+    return render_template("portal_ticket.html", t=t, c=c, messages=msgs, public=True, seen=seen,
+                           just_sent=request.args.get("sent") == "1",
                            attached=files.by_message(g.db, t["id"]))
+
+
+@app.route("/help/t/<public_token>/state")
+def portal_state(public_token):
+    """What the staff member's page needs to know: new replies, typing, seen."""
+    t = g.db.execute("SELECT * FROM tickets WHERE public_token = ?", (public_token,)).fetchone()
+    if not t:
+        abort(404)
+    last = g.db.execute("SELECT COALESCE(MAX(id), 0) FROM messages WHERE ticket_id = ?", (t["id"],)).fetchone()[0]
+    typing = t["tech_typing_until"] and t["tech_typing_until"] > db.now()
+    last_user = g.db.execute("SELECT MAX(created_at) FROM messages WHERE ticket_id = ? AND sender = 'user'",
+                             (t["id"],)).fetchone()[0] or ""
+    seen = int(bool(t["tech_seen_at"] and t["tech_seen_at"] >= last_user and t["status"] == "open"))
+    return jsonify(key=f"{last}-{t['status']}-{t['rating'] or 0}-{seen}",
+                   typing=t["tech_typing_name"] if typing else "")
+
+
+@app.route("/help/t/<public_token>/typing", methods=["POST"])
+def portal_typing(public_token):
+    g.db.execute("UPDATE tickets SET user_typing_until = ? WHERE public_token = ?", (typing_until(), public_token))
+    g.db.commit()
+    return "", 204
 
 
 @app.route("/help/t/<public_token>/files/<int:file_id>")

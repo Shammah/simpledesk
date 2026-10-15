@@ -34,7 +34,7 @@
   document.addEventListener("click", function (e) {
     if (e.target.closest(".menu-btn")) { setMenu(!nav.classList.contains("open")); return; }
     if (nav && nav.classList.contains("open") && !e.target.closest(".nav-menu, .tour")) setMenu(false);
-    var toggle = e.target.closest(".theme-toggle:not(.install-btn)");
+    var toggle = e.target.closest(".theme-toggle:not(.install-btn):not(.sound-toggle)");
     if (toggle) {
       var next = current() === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);

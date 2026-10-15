@@ -2,9 +2,17 @@
 {% block title %}Your request - {{ c.name }}{% endblock %}
 {% block wrap %}public{% endblock %}
 {% block content %}
+{% if just_sent %}
+<div class="sent-card" data-sent>
+  <div class="sent-check" aria-hidden="true"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27 l7 7 l15 -16"/></svg></div>
+  <div><strong>Request sent!</strong><br><span class="muted small">{{ 'An answer is below.' if t.status == 'ai_answered' else 'A technician will reply on this page. You can leave it open.' }}</span></div>
+</div>
+{% endif %}
 <h1>Your request</h1>
+
+<div id="thread" data-state="{{ url_for('portal_state', public_token=t.public_token) }}" data-key="{{ messages[-1].id if messages else 0 }}-{{ t.status }}-{{ t.rating or 0 }}-{{ 1 if seen else 0 }}">
 <p><span class="tag {{ t.status }}">{{ {'ai_answered': 'Answered: did it work?', 'open': 'With a technician', 'resolved': 'Solved'}[t.status] }}</span>
-  <span class="muted small">Keep this page open or bookmark it to see replies.</span></p>
+  <span class="muted small">This page updates by itself when there's a reply.</span></p>
 
 {% for m in messages %}
 <div class="msg {{ m.sender }}">
@@ -19,6 +27,7 @@
   {% endfor %}</div>{% endif %}
 </div>
 {% endfor %}
+{% if seen %}<p class="seen small">✓✓ Seen by a technician</p>{% endif %}
 
 {% if t.status == 'ai_answered' %}
 <div class="card">
@@ -30,7 +39,6 @@
   </form>
 </div>
 {% elif t.status == 'open' %}
-<div class="note">A technician has your request and will reply here. <a href="">Check for a reply</a></div>
 <form method="post" style="margin-bottom:16px">{{ csrf() }}<button class="btn ghost" name="action" value="solved">It is fixed now, close my request</button></form>
 {% else %}
   {% if not t.rating %}
@@ -50,10 +58,13 @@
   {% endif %}
 <div class="note">This request is closed. If the problem comes back, write below and it will reopen.</div>
 {% endif %}
+</div>
+<div class="typing" data-typing hidden><span class="dots"><i></i><i></i><i></i></span><span><span data-typing-name></span> from IT is typing…</span></div>
 
 <form method="post" class="card" enctype="multipart/form-data">
   {{ csrf() }}<input type="hidden" name="action" value="reply">
-  <div class="field"><label for="body">Add more detail</label><textarea id="body" name="body" maxlength="6000"></textarea></div>
+  <div class="field"><label for="body">Add more detail</label>
+    <textarea id="body" name="body" maxlength="6000" data-typing-url="{{ url_for('portal_typing', public_token=t.public_token) }}"></textarea></div>
   <div class="field"><label for="files">Add a screenshot or photo (optional)</label>
     <input type="file" id="files" name="files" accept="{{ file_accept }}" multiple></div>
   <button class="btn ghost">Send</button>

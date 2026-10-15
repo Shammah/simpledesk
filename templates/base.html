@@ -47,12 +47,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script src="{{ url_for('static', filename='app.js') }}" defer></script>
-{% if g.tech and not public %}
+<script src="{{ url_for('static', filename='live.js') }}" defer></script>
 <meta name="csrf" content="{{ csrf_token() }}">
+{% if g.tech and not public %}
 <script src="{{ url_for('static', filename='tour.js') }}" defer></script>
 {% endif %}
 </head>
-<body{% if g.tech and not public and not g.tech.tour_done and request.endpoint == 'dashboard' %} data-tour="first-time"{% endif %}>
+{% from "_ui.html" import avatar %}
+<body{% if g.tech and not public and not g.tech.tour_done and request.endpoint == 'dashboard' %} data-tour="first-time"{% endif %}
+  {%- if g.tech and not public %} data-live="{{ url_for('live') }}" data-last-activity="{{ last_activity }}"{% endif %}>
 <div class="page-loader" aria-hidden="true">
   <div class="loader-bar"></div>
   <div class="loader-card"><span class="loader-ring"></span><span class="mark"></span></div>
@@ -72,7 +75,8 @@
       <input type="search" name="q" placeholder="Search or #ticket" aria-label="Search tickets, people, devices and guides" value="{{ q if here == 'search' else '' }}">
     </form>
     <a href="{{ url_for('dashboard') }}" class="{{ 'on' if here == 'dashboard' }}">Dashboard</a>
-    <a href="{{ url_for('tickets') }}" class="{{ 'on' if here in ('tickets', 'ticket') }}">Tickets</a>
+    <a href="{{ url_for('tickets') }}" class="{{ 'on' if here in ('tickets', 'ticket') }}">Tickets
+      <span class="nav-count" data-live-open {{ 'hidden' if not nav_open }}>{{ nav_open }}</span></a>
     <a href="{{ url_for('companies') }}" class="{{ 'on' if here in ('companies', 'company', 'checklist', 'company_report') }}">Companies</a>
     <a href="{{ url_for('guides') }}" class="{{ 'on' if here in ('guides', 'guide_edit') }}">Guides</a>
     <a href="{{ url_for('saved_replies') }}" class="{{ 'on' if here == 'saved_replies' }}">Saved replies</a>
@@ -82,8 +86,10 @@
     <a href="{{ url_for('privacy') }}" class="{{ 'on' if here == 'privacy' }}">Privacy &amp; data</a>
     <div class="who">
       <button type="button" class="theme-toggle install-btn" hidden><span class="dot"></span>Install app</button>
-      <button type="button" class="theme-toggle"><span class="dot"></span><span class="label">Dark mode</span></button><br>
-      {{ g.tech.name }}<br><span class="muted">{{ g.provider.name }}</span>
+      <button type="button" class="theme-toggle"><span class="dot"></span><span class="label">Dark mode</span></button>
+      <button type="button" class="theme-toggle sound-toggle" aria-pressed="true"><span class="dot"></span><span class="label">Sound on</span></button>
+      <div class="me">{{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'sm') }}
+        <div>{{ g.tech.name }}<br><span class="muted">{{ g.provider.name }}</span></div></div>
       <a href="{{ url_for('dashboard', tour=1) }}" class="tour-link">Take the tour</a>
       <form method="post" action="{{ url_for('logout') }}">{{ csrf() }}<button>Sign out</button></form>
     </div>
@@ -91,17 +97,18 @@
   </nav>
   <div class="nav-backdrop"></div>
   <main class="main">
-    {% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}
+    {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="flash"{% if cat == 'celebrate' %} data-celebrate{% endif %}>{{ m }}</div>{% endfor %}
     {% block content %}{% endblock %}
   </main>
 </div>
+<div class="toasts" aria-live="polite"></div>
 {% else %}
 <div class="outside">
-  <div class="brandbar"><span class="mark"></span>{{ brand_name or ('IT help' if public else app_name) }}
+  <div class="brandbar">{% if public and c and c.logo %}<img class="brand-logo" src="{{ url_for('portal_logo', token=c.portal_token) }}" alt="">{% else %}<span class="mark"></span>{% endif %}{{ brand_name or ((c.name ~ ' IT help') if public and c else ('IT help' if public else app_name)) }}
     <button type="button" class="theme-toggle install-btn" hidden><span class="dot"></span>Install app</button>
     <button type="button" class="theme-toggle"><span class="dot"></span><span class="label">Dark mode</span></button></div>
   <div class="{% block wrap %}center{% endblock %}">
-    {% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}
+    {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="flash"{% if cat == 'celebrate' %} data-celebrate{% endif %}>{{ m }}</div>{% endfor %}
     {{ self.content() }}
   </div>
   <footer class="site-foot"><a href="{{ url_for('privacy_policy') }}">Privacy policy</a></footer>
