@@ -20,7 +20,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $package = Join-Path $env:TEMP "simpledesk-upload.tgz"
 
 Write-Host "==> Packing the app (without .venv, data and caches)"
-tar -czf $package --exclude=.venv --exclude=data --exclude=__pycache__ --exclude=.claude -C $root .
+tar -czf $package --exclude=.venv --exclude=data --exclude=__pycache__ --exclude=.claude --exclude=.git --exclude=server-backups -C $root .
 if ($LASTEXITCODE -ne 0) { throw "Packing failed." }
 
 Write-Host "==> Sending to $Server"

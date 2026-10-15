@@ -19,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
+import monitoring  # noqa: E402
 
 
 def make_backup():
@@ -64,9 +65,28 @@ def remove_old():
     return removed
 
 
-if __name__ == "__main__":
+def main():
     saved = make_backup()
     size = saved.stat().st_size / 1024
     removed = remove_old()
     print(f"Backup saved: {saved} ({size:.0f} KB). Removed {removed} backup(s) older than "
           f"{config.BACKUP_KEEP_DAYS} days.")
+
+
+if __name__ == "__main__":
+    # With SENTRY_DSN set, Sentry alerts you if a backup fails or never runs.
+    if not monitoring.init("backup"):
+        main()
+    else:
+        import sentry_sdk
+        check_in = monitoring.backup_checkin("in_progress")
+        try:
+            main()
+        except BaseException as exc:
+            monitoring.backup_checkin("error", check_in)
+            sentry_sdk.capture_message(f"Nightly backup failed: {exc}", level="error")
+            raise
+        else:
+            monitoring.backup_checkin("ok", check_in)
+        finally:
+            sentry_sdk.flush(timeout=10)

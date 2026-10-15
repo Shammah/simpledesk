@@ -66,6 +66,8 @@ SIMPLEDESK_ANDROID_PACKAGE=
 SIMPLEDESK_ANDROID_SHA256=
 # Optional, for AI-written answers:
 # ANTHROPIC_API_KEY=
+# Optional, error alerts: Sentry > Project settings > Client Keys (DSN):
+# SENTRY_DSN=
 EOF
 else
   sed -i "s|^SIMPLEDESK_DOMAIN=.*|SIMPLEDESK_DOMAIN=$DOMAIN|" "$ENVFILE"

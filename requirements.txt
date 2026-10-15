@@ -1,4 +1,6 @@
 flask>=3.1
 anthropic>=1.13
+# Error alerts (only active when SENTRY_DSN is set).
+sentry-sdk[flask]>=2.0
 # Production web server, used on the Linux server only.
 gunicorn>=23; sys_platform != "win32"

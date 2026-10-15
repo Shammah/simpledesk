@@ -20,7 +20,7 @@ HTTPS = os.environ.get("SIMPLEDESK_HTTPS") == "1"
 # ---- Shown on the public privacy policy page ----
 BUSINESS_NAME = os.environ.get("SIMPLEDESK_BUSINESS_NAME", "SimpleDesk")
 CONTACT_EMAIL = os.environ.get("SIMPLEDESK_CONTACT_EMAIL", "privacy@example.com")   # change before publishing
-POLICY_UPDATED = "14 October 2026"
+POLICY_UPDATED = "15 October 2026"
 
 # ---- Android app (Play Store) ----
 # server: from PWABuilder after you build the Android package. Together they

@@ -171,9 +171,28 @@ know it works before you need it.
 
 ## 7. Keeping it healthy
 
-**Set up once**
-- A free uptime monitor (for example UptimeRobot) checking
-  `https://your-address/healthz` every 5 minutes, alerting your email or phone.
+**Set up once: monitoring (both free)**
+
+*UptimeRobot: tells you when the site is down.*
+1. Sign up at uptimerobot.com, then **New monitor**.
+2. Type **HTTP(s) - Keyword**. URL `https://your-address/healthz`, keyword `ok`
+   (alert when the keyword does *not* exist), interval 5 minutes.
+3. Add your email, and the UptimeRobot phone app for push alerts.
+
+`/healthz` answers `ok` only when the website, the database and (once email
+is switched on) the mailbox checker are all working. Otherwise UptimeRobot alerts you.
+
+*Sentry: tells you when something breaks inside the app, and if a nightly backup fails or doesn't run.*
+1. Sign up at sentry.io, create a project of type **Flask**, and copy its **DSN**
+   (Project settings > Client Keys).
+2. On the server: `nano /etc/simpledesk.env`, add the line `SENTRY_DSN=<your DSN>`, save, then
+   `systemctl restart simpledesk simpledesk-mail`.
+3. The "nightly-backup" monitor appears under **Crons** after the first backup
+   (or run one now: `systemctl start simpledesk-backup.service`).
+
+Sentry only gets technical details. Cookies, form contents and web addresses
+with private links are left out, and email addresses, phone numbers and passwords
+are blanked before anything is sent.
 
 **Weekly**
 - Download the backups (section 6).

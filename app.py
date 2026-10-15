@@ -24,7 +24,9 @@ import ai
 import channels
 import config
 import db
+import monitoring
 
+monitoring.init("web")   # error alerts, only when SENTRY_DSN is set
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
 
@@ -204,9 +206,13 @@ def favicon():
 
 @app.route("/healthz")
 def healthz():
-    """For an uptime monitor: answers 'ok' if the app and database respond."""
+    """For the uptime monitor (UptimeRobot): 'ok' if the app, the database and,
+    when email is switched on, the mailbox checker are all working."""
+    headers = {"Content-Type": "text/plain", "Cache-Control": "no-store"}
     g.db.execute("SELECT 1").fetchone()
-    return "ok", 200, {"Content-Type": "text/plain", "Cache-Control": "no-store"}
+    if channels.email_in() and monitoring.mail_worker_stalled():
+        return "mail worker stopped", 503, headers
+    return "ok", 200, headers
 
 
 @app.route("/privacy-policy")
@@ -1161,7 +1167,9 @@ def process_email(mail):
 
 def email_poller():
     """Background loop: check the helpdesk mailbox once a minute."""
+    mailbox_failing = False
     while True:
+        monitoring.mail_beat()
         if channels.email_in():
             with app.app_context():
                 g.db = db.connect()
@@ -1169,11 +1177,17 @@ def email_poller():
                     for mail in channels.fetch_emails():
                         try:
                             process_email(mail)
-                        except Exception as exc:             # one bad email must not stop the rest
+                        except Exception:                    # one bad email must not stop the rest
                             g.db.rollback()
-                            app.logger.error("Could not process email from %s: %s", mail["address"], exc)
+                            app.logger.exception("Could not process email from %s", mail["address"])
+                    if mailbox_failing:
+                        app.logger.warning("Mailbox reachable again.")
+                    mailbox_failing = False
                 except Exception as exc:
-                    app.logger.error("Could not check the mailbox: %s", exc)
+                    # Report the first failure only, not one alert a minute while it lasts.
+                    log = app.logger.warning if mailbox_failing else app.logger.error
+                    log("Could not check the mailbox: %s", exc)
+                    mailbox_failing = True
                 finally:
                     g.db.close()
         time.sleep(60)
