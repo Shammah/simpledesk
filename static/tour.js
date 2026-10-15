@@ -14,16 +14,14 @@
       text: "Add each company you look after. Every company gets its own help link to share with their staff." },
     { target: '.nav-menu a[href="/tickets"]', nav: true, title: "2. Requests arrive here",
       text: "When staff ask for help, by help link, email or WhatsApp, it lands here as a ticket." },
-    { target: '.nav-menu a[href="/guides"]', nav: true, title: "3. Answer once, reuse forever",
-      text: "Write a fix as a guide. Next time someone has that problem, they get the answer straight away." },
-    { target: '.nav-menu a[href="/checklists"]', nav: true, title: "4. Never miss a step",
-      text: "Keep lists for new starters and leavers, then tick them off for each person." },
-    { target: '.nav-menu a[href="/channels"]', nav: true, title: "5. Email and WhatsApp",
-      text: "Switch on email and WhatsApp here so staff can reach you the way they like." },
-    { target: ".stat.hero", title: "6. Show your value",
+    { target: '.nav-group[data-group="knowledge"] .nav-group-btn', nav: true, title: "3. Answer once, reuse forever",
+      text: "Under Knowledge: write a fix as a guide, and next time someone has that problem they get the answer straight away. Saved replies and starter checklists live here too." },
+    { target: '.nav-group[data-group="settings"] .nav-group-btn', nav: true, title: "4. Set it up your way",
+      text: "Under Settings: switch on email and WhatsApp, invite your team, and choose your plan." },
+    { target: ".stat.hero", title: "5. Show your value",
       text: "This shows how many problems were solved without you lifting a finger. Great to show clients." },
-    { target: ".theme-toggle:not(.install-btn)", nav: true, title: "7. Make it yours",
-      text: "Switch between light and dark whenever you like." },
+    { target: ".nav .me", nav: true, title: "6. Make it yours",
+      text: "Your photo, password and alerts are in your account. Light or dark mode is right below it." },
     { title: "You're all set!", wave: true, last: true,
       text: "Start by adding your first client. You can replay this tour from the menu any time." },
   ].filter(function (s) { return !s.target || document.querySelector(s.target); });
@@ -92,9 +90,9 @@
     var wait = 0;
     if (narrow() && menuOpen()) { menuBtn.click(); wait = 300; }
     root.querySelector("#tour-title").textContent = step.title;
-    // On phones the menu is folded into the three dots, so point there instead.
+    // When the menu is folded away, point at the menu button instead.
     root.querySelector(".tour-text").textContent =
-      step.text + (narrow() && step.nav ? " Find it in the menu (the three dots)." : "");
+      step.text + (narrow() && step.nav ? " Open the menu (the button at the top right) to find it." : "");
     backBtn.hidden = i === 0;
     nextBtn.textContent = step.last ? "Add my first client" : i === 0 ? "Show me" : "Next";
     skipBtn.textContent = step.last ? "Close" : "Skip tour";

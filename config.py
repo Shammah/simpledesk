@@ -22,6 +22,12 @@ BUSINESS_NAME = os.environ.get("SIMPLEDESK_BUSINESS_NAME", "SimpleDesk")
 CONTACT_EMAIL = os.environ.get("SIMPLEDESK_CONTACT_EMAIL", "privacy@example.com")   # change before publishing
 POLICY_UPDATED = "16 October 2026"
 
+# ---- The public "About us" page ----
+# Write your own story here, in your own words. Blank lines start new paragraphs.
+BUSINESS_LOCATION = os.environ.get("SIMPLEDESK_LOCATION", "Nairobi, Kenya")
+ABOUT_STORY = """\
+"""
+
 # ---- Android app (Play Store) ----
 # server: from PWABuilder after you build the Android package. Together they
 # prove to Android that the app and this website belong together.

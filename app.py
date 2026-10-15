@@ -113,7 +113,8 @@ def csrf_field():
 
 
 def password_stamp(tech):
-    return hashlib.sha256(tech["password_hash"].encode()).hexdigest()[:16]
+    """Changes when the password or session key changes, which signs out other devices."""
+    return hashlib.sha256((tech["password_hash"] + tech["session_key"]).encode()).hexdigest()[:16]
 
 
 def sign_in(tech):
@@ -181,6 +182,15 @@ def initials(name):
 def iso(value):
     """Database time -> ISO with Z, for the page's own clock (countdown rings)."""
     return value.replace(" ", "T") + "Z" if value else ""
+
+
+def provider_contact(provider_id):
+    """The IT provider's support line, for the footer of their clients' help pages."""
+    return g.db.execute("SELECT support_phone, support_hours FROM providers WHERE id = ?",
+                        (provider_id,)).fetchone()
+
+
+app.jinja_env.globals["provider_contact"] = provider_contact
 
 
 @app.context_processor
@@ -1467,33 +1477,7 @@ def team():
     pid = g.provider["id"]
     if request.method == "POST":
         action = request.form.get("action")
-        # Anyone can change their own settings; the rest is for the owner.
-        if action == "my_settings":
-            notify = request.form.get("notify")
-            if notify in ("all", "mine", "none"):
-                g.db.execute("UPDATE technicians SET notify = ? WHERE id = ?", (notify, g.tech["id"]))
-                flash("Saved.")
-        elif action == "my_password":
-            new = request.form.get("new_password", "")
-            if not check_password_hash(g.tech["password_hash"], request.form.get("current_password", "")):
-                flash("Your current password is not right.")
-            elif len(new) < 8:
-                flash("The new password needs at least 8 characters.")
-            else:
-                g.db.execute("UPDATE technicians SET password_hash = ? WHERE id = ?",
-                             (generate_password_hash(new), g.tech["id"]))
-                g.db.commit()
-                sign_in(g.db.execute("SELECT * FROM technicians WHERE id = ?", (g.tech["id"],)).fetchone())
-                flash("Password changed. Other devices have been signed out.")
-        elif action in ("my_photo", "remove_photo"):
-            if action == "my_photo":
-                stored, problem = files.save_picture(request.files.get("photo"), g.tech["photo"])
-                flash(problem or "Photo updated.")
-            else:
-                files.remove_picture(g.tech["photo"])
-                stored = ""
-            g.db.execute("UPDATE technicians SET photo = ? WHERE id = ?", (stored, g.tech["id"]))
-        elif g.tech["role"] != "owner":
+        if g.tech["role"] != "owner":
             abort(403)
         elif action == "add":
             return invite_technician(bill)
@@ -1538,6 +1522,134 @@ def team():
                            badges=insights.badges(g.db, pid),
                            payments_ready=bool(payments.settings()),
                            grace_days=config.PAYMENT_GRACE_DAYS)
+
+
+def reload_me():
+    return g.db.execute("SELECT * FROM technicians WHERE id = ?", (g.tech["id"],)).fetchone()
+
+
+@app.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    """Your own profile, password, alerts and how your month is going."""
+    me = g.tech["id"]
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "profile":
+            name = request.form.get("name", "").strip()[:100]
+            email = request.form.get("email", "").strip().lower()
+            if not name or "@" not in email:
+                flash("Enter your name and email.")
+            elif email != g.tech["email"] and not check_password_hash(
+                    g.tech["password_hash"], request.form.get("password", "")):
+                flash("To change your email, enter your current password too.")
+            elif email != g.tech["email"] and g.db.execute(
+                    "SELECT 1 FROM technicians WHERE email = ?", (email,)).fetchone():
+                flash("That email already has an account.")
+            else:
+                g.db.execute("UPDATE technicians SET name = ?, email = ? WHERE id = ?", (name, email, me))
+                flash("Profile saved.")
+        elif action == "alerts":
+            notify = request.form.get("notify")
+            if notify in ("all", "mine", "none"):
+                g.db.execute("UPDATE technicians SET notify = ? WHERE id = ?", (notify, me))
+                flash("Email alerts saved.")
+        elif action == "password":
+            new = request.form.get("new_password", "")
+            if not check_password_hash(g.tech["password_hash"], request.form.get("current_password", "")):
+                flash("Your current password is not right.")
+            elif len(new) < 8:
+                flash("The new password needs at least 8 characters.")
+            elif new != request.form.get("confirm_password", new):
+                flash("The two new passwords don't match.")
+            else:
+                g.db.execute("UPDATE technicians SET password_hash = ? WHERE id = ?",
+                             (generate_password_hash(new), me))
+                g.db.commit()
+                sign_in(reload_me())
+                flash("Password changed. Other devices have been signed out.")
+        elif action == "sign_out_others":
+            g.db.execute("UPDATE technicians SET session_key = ? WHERE id = ?", (secrets.token_hex(8), me))
+            g.db.commit()
+            sign_in(reload_me())
+            flash("Signed out of every other device. You're still signed in here.")
+        elif action in ("photo", "remove_photo"):
+            if action == "photo":
+                stored, problem = files.save_picture(request.files.get("photo"), g.tech["photo"])
+                flash(problem or "Photo updated.")
+            else:
+                files.remove_picture(g.tech["photo"])
+                stored = ""
+            g.db.execute("UPDATE technicians SET photo = ? WHERE id = ?", (stored, me))
+        g.db.commit()
+        return redirect(url_for("account"))
+    month = month_start()
+    mine = g.db.execute(
+        "SELECT SUM(status = 'resolved' AND resolved_at >= ?) AS resolved,"
+        " AVG(CASE WHEN first_reply_at >= ? AND target_met IS NOT NULL THEN"
+        "   (julianday(first_reply_at) - julianday(COALESCE(waiting_since, created_at))) * 1440 END) AS reply_min,"
+        " SUM(rating = 3 AND resolved_at >= ?) AS happy, SUM(rating IS NOT NULL AND resolved_at >= ?) AS rated,"
+        " SUM(status = 'open') AS open"
+        " FROM tickets WHERE assigned_to = ?", (month, month, month, month, me)).fetchone()
+    minutes = g.db.execute("SELECT COALESCE(SUM(minutes), 0) FROM time_entries WHERE tech_id = ? AND created_at >= ?",
+                           (me, month)).fetchone()[0]
+    return render_template("account.html", mine=mine, minutes=minutes,
+                           my_badges=insights.badges(g.db, g.provider["id"]).get(me, []))
+
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    """Business details (owner), how the app looks and sounds (everyone), and the danger zone."""
+    owner = g.tech["role"] == "owner"
+    pid = g.provider["id"]
+    if request.method == "POST":
+        if not owner:
+            abort(403)
+        action = request.form.get("action")
+        if action == "business":
+            name = request.form.get("business_name", "").strip()[:100]
+            billing_email = request.form.get("billing_email", "").strip().lower()
+            if not name:
+                flash("Your business needs a name.")
+            else:
+                g.db.execute("UPDATE providers SET name = ?, billing_email = ?, support_phone = ?, support_hours = ?"
+                             " WHERE id = ?",
+                             (name, billing_email if "@" in billing_email else "",
+                              request.form.get("support_phone", "").strip()[:40],
+                              request.form.get("support_hours", "").strip()[:80], pid))
+                flash("Business details saved.")
+        elif action == "delete_business":
+            if request.form.get("confirm", "").strip() != g.provider["name"]:
+                flash("Type your business name exactly to confirm. Nothing was deleted.")
+            elif not check_password_hash(g.tech["password_hash"], request.form.get("password", "")):
+                flash("Your password is not right. Nothing was deleted.")
+            else:
+                for c in g.db.execute("SELECT id FROM companies WHERE provider_id = ?", (pid,)).fetchall():
+                    files.remove_for_company(g.db, c["id"])
+                for t in g.db.execute("SELECT photo FROM technicians WHERE provider_id = ?", (pid,)).fetchall():
+                    files.remove_picture(t["photo"])
+                g.db.execute("DELETE FROM technicians WHERE provider_id = ?", (pid,))
+                g.db.execute("DELETE FROM providers WHERE id = ?", (pid,))
+                g.db.commit()
+                session.clear()
+                flash("Your business account and all its data have been deleted.")
+                return redirect(url_for("login"))
+        g.db.commit()
+        return redirect(url_for("settings"))
+    counts = g.db.execute(
+        "SELECT (SELECT COUNT(*) FROM companies WHERE provider_id = ?),"
+        " (SELECT COUNT(*) FROM tickets t JOIN companies c ON c.id = t.company_id WHERE c.provider_id = ?),"
+        " (SELECT COUNT(*) FROM technicians WHERE provider_id = ? AND active = 1)", (pid, pid, pid)).fetchone()
+    return render_template("settings.html", owner=owner, counts=counts, priorities=config.PRIORITIES)
+
+
+@app.route("/about")
+def about():
+    """Public page about SimpleDesk and the business behind it."""
+    return render_template("about.html", business=config.BUSINESS_NAME, contact=config.CONTACT_EMAIL,
+                           story=config.ABOUT_STORY, location=config.BUSINESS_LOCATION,
+                           priorities=config.PRIORITIES)
 
 
 def share_link(tech, kind):

@@ -165,7 +165,7 @@
 
   // ---- Confetti ----
   function confetti(amount) {
-    if (reduceMotion) return;
+    if (reduceMotion || store("celebrate") === "off") return;
     var colors = ["#4f46e5", "#3b6fd8", "#0d9488", "#5eead4", "#f59e0b", "#ec4899"];
     var layer = document.createElement("div");
     layer.className = "confetti";
@@ -202,6 +202,57 @@
     if (icon) icon.textContent = part[1];
     document.documentElement.setAttribute("data-daytime", part[2]);
   }
+
+  // ---- Settings page: theme, sound and celebrations, saved on this device ----
+  var themePick = document.querySelector('[data-pref="theme"]');
+  if (themePick) {
+    var showTheme = function () {
+      var chosen = store("theme") || "system";
+      themePick.querySelectorAll("button").forEach(function (b) {
+        b.setAttribute("aria-pressed", b.getAttribute("data-value") === chosen ? "true" : "false");
+      });
+    };
+    themePick.addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-value]");
+      if (!b) return;
+      var value = b.getAttribute("data-value");
+      if (value === "system") {
+        try { localStorage.removeItem("theme"); } catch (err) {}
+        document.documentElement.removeAttribute("data-theme");
+      } else {
+        store("theme", value);
+        document.documentElement.setAttribute("data-theme", value);
+      }
+      // Let the menu's light/dark button catch up.
+      var media = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+      var mode = value === "system" ? (media && media.matches ? "dark" : "light") : value;
+      document.documentElement.setAttribute("data-mode", mode);
+      document.querySelectorAll(".theme-toggle:not(.install-btn):not(.sound-toggle):not(.pin-btn) .label").forEach(function (l) {
+        l.textContent = mode === "dark" ? "Light mode" : "Dark mode";
+      });
+      showTheme();
+    });
+    showTheme();
+  }
+  var soundBox = document.querySelector('input[data-pref="sound"]');
+  if (soundBox) {
+    soundBox.checked = soundOn;
+    soundBox.addEventListener("change", function () {
+      soundOn = soundBox.checked; store("sound", soundOn ? "on" : "off"); showSound();
+    });
+  }
+  var partyBox = document.querySelector('input[data-pref="celebrate"]');
+  if (partyBox) {
+    partyBox.checked = store("celebrate") !== "off";
+    partyBox.addEventListener("change", function () {
+      store("celebrate", partyBox.checked ? "on" : "off");
+      if (partyBox.checked) confetti(60);
+    });
+  }
+  var testChime = document.querySelector("[data-test-chime]");
+  if (testChime) testChime.addEventListener("click", function () {
+    var was = soundOn; soundOn = true; setTimeout(function () { chime(); soundOn = was; }, 30);
+  });
 
   // ---- Help page: quick-pick topics, and remembering who you are ----
   var problem = document.getElementById("problem");

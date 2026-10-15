@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_ui.html" import avatar %}
+{% block title %}Your account - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head account-head">
+  <div class="who-cell">
+    {{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'lg') }}
+    <div><h1>{{ g.tech.name }}</h1>
+      <p class="muted">{{ 'Owner' if g.tech.role == 'owner' else 'Technician' }} at {{ g.provider.name }} · {{ g.tech.email }}
+        {% for icon, title, why in my_badges %}<span class="badge-chip" title="{{ why }}">{{ icon }} {{ title }}</span>{% endfor %}</p></div>
+  </div>
+</div>
+
+<h2 class="section-title">Your month so far</h2>
+<div class="grid">
+  <div class="stat hero"><div class="n">{{ mine.resolved or 0 }}</div><div class="l">tickets you resolved</div></div>
+  <div class="stat"><div class="n">{{ (mine.reply_min|round|int ~ ' min') if mine.reply_min is not none else '-' }}</div><div class="l">your average first reply</div></div>
+  <div class="stat"><div class="n">{{ ((100 * mine.happy / mine.rated)|round|int ~ '%') if mine.rated else '-' }}</div><div class="l">rated good{% if mine.rated %} ({{ mine.rated }} rating{{ 's' if mine.rated != 1 }}){% endif %}</div></div>
+  <div class="stat"><div class="n">{{ minutes|hours }}</div><div class="l">time you logged</div></div>
+  <div class="stat"><div class="n">{{ mine.open or 0 }}</div><div class="l">open tickets assigned to you</div></div>
+</div>
+
+<div class="half">
+  <div class="card">
+    <h2>Profile</h2>
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="action" value="profile">
+      <div class="field"><label for="name">Name</label><input type="text" id="name" name="name" value="{{ g.tech.name }}" maxlength="100" required autocomplete="name"></div>
+      <div class="field"><label for="email">Email (you sign in with this)</label><input type="email" id="email" name="email" value="{{ g.tech.email }}" required autocomplete="email"></div>
+      <div class="field"><label for="password">Current password <span class="muted">(only to change your email)</span></label><input type="password" id="password" name="password" autocomplete="current-password"></div>
+      <button class="btn ghost fit">Save profile</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Photo</h2>
+    <div class="row" style="align-items:center">
+      <div class="fit">{{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'lg') }}</div>
+      <form method="post" enctype="multipart/form-data" class="row">
+        {{ csrf() }}<input type="hidden" name="action" value="photo">
+        <div><label for="photo">{{ 'Change' if g.tech.photo else 'Add' }} your photo</label><input type="file" id="photo" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required></div>
+        <button class="btn ghost fit">Upload</button>
+      </form>
+    </div>
+    {% if g.tech.photo %}<form method="post" style="margin-top:8px">{{ csrf() }}<button class="link" name="action" value="remove_photo">Remove photo</button></form>{% endif %}
+    <p class="small muted" style="margin:8px 0 0">Your team sees it next to your replies and in the menu. PNG or JPEG, up to 2 MB.</p>
+  </div>
+</div>
+
+<div class="half">
+  <div class="card">
+    <h2>Email alerts</h2>
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="action" value="alerts">
+      {% for value, label in [('all', 'Every ticket that needs a technician, and anything assigned to me'), ('mine', 'Only tickets assigned to me'), ('none', 'No emails')] %}
+      <label class="check"><input type="radio" name="notify" value="{{ value }}" {{ 'checked' if g.tech.notify == value }}> {{ label }}</label>
+      {% endfor %}
+      <button class="btn ghost fit">Save</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Password</h2>
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="action" value="password">
+      <div class="field"><label for="current_password">Current password</label><input type="password" id="current_password" name="current_password" required autocomplete="current-password"></div>
+      <div class="row">
+        <div><label for="new_password">New password</label><input type="password" id="new_password" name="new_password" minlength="8" required autocomplete="new-password"></div>
+        <div><label for="confirm_password">Type it again</label><input type="password" id="confirm_password" name="confirm_password" minlength="8" required autocomplete="new-password"></div>
+      </div>
+      <button class="btn ghost fit" style="margin-top:12px">Change password</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Signed-in devices</h2>
+  <p class="small muted">Lost a phone or used a shared computer? Sign out everywhere except here. Changing your password does this too.</p>
+  <form method="post" class="row">
+    {{ csrf() }}<button class="btn ghost fit" name="action" value="sign_out_others">Sign out all other devices</button>
+    <button class="btn ghost fit" formaction="{{ url_for('logout') }}">Sign out here</button>
+  </form>
+</div>
+{% endblock %}

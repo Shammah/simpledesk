@@ -119,39 +119,5 @@
   {% endif %}
 </div>
 
-<div class="card">
-  <h2>Your photo</h2>
-  <div class="row" style="align-items:center">
-    <div class="fit">{{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'lg') }}</div>
-    <form method="post" enctype="multipart/form-data" class="row">
-      {{ csrf() }}<input type="hidden" name="action" value="my_photo">
-      <div><label for="photo">{{ 'Change' if g.tech.photo else 'Add' }} your photo</label><input type="file" id="photo" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required></div>
-      <button class="btn ghost fit">Upload</button>
-    </form>
-    {% if g.tech.photo %}<form method="post" class="fit">{{ csrf() }}<button class="link" name="action" value="remove_photo">Remove photo</button></form>{% endif %}
-  </div>
-  <p class="small muted" style="margin:8px 0 0">Your team sees it next to your replies and in the menu.{% if badges|length > 1 %} Badges are earned each month: ⚡ fastest reply, 🏁 most resolved, 🌟 most 😀 ratings, ⏱ every reply on time.{% endif %}</p>
-</div>
-
-<div class="half">
-  <div class="card">
-    <h2>Your email alerts</h2>
-    <form method="post">
-      {{ csrf() }}<input type="hidden" name="action" value="my_settings">
-      {% for value, label in [('all', 'Every ticket that needs a technician, and anything assigned to me'), ('mine', 'Only tickets assigned to me'), ('none', 'No emails')] %}
-      <label class="check"><input type="radio" name="notify" value="{{ value }}" {{ 'checked' if g.tech.notify == value }}> {{ label }}</label>
-      {% endfor %}
-      <button class="btn ghost fit">Save</button>
-    </form>
-  </div>
-  <div class="card">
-    <h2>Change your password</h2>
-    <form method="post">
-      {{ csrf() }}<input type="hidden" name="action" value="my_password">
-      <div class="field"><label for="current_password">Current password</label><input type="password" id="current_password" name="current_password" required autocomplete="current-password"></div>
-      <div class="field"><label for="new_password">New password</label><input type="password" id="new_password" name="new_password" minlength="8" required autocomplete="new-password"></div>
-      <button class="btn ghost fit">Change password</button>
-    </form>
-  </div>
-</div>
+<p class="small muted">Your own photo, password and email alerts are under <a href="{{ url_for('account') }}">Account</a>.{% if badges|length > 1 %} Badges are earned each month: ⚡ fastest reply, 🏁 most resolved, 🌟 most 😀 ratings, ⏱ every reply on time.{% endif %}</p>
 {% endblock %}

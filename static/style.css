@@ -281,60 +281,111 @@ ul.plain li:last-child { border-bottom: 0; }
 .msg.tech { background: var(--ok-soft); border-color: var(--ok-line); }
 .msg.system { background: var(--panel-2); border-style: dashed; color: var(--muted); box-shadow: none; }
 
-/* Narrow screens: the menu folds into a three-dot button */
+/* ===================== The menu =====================
+   Folded behind the menu button on every screen: a top bar with the logo, and
+   a panel that opens over the page. On wide screens it can be pinned open as a
+   sidebar ("Keep menu open"), which is remembered on that device. */
+.shell { flex-direction: column; }
+.nav { width: auto; height: auto; position: sticky; top: 0; z-index: 20; padding: 10px 22px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.nav .logo { padding: 0 4px; color: #fff; text-decoration: none; }
+.nav .logo:hover { background: none; padding-left: 4px; }
+.main { width: 100%; margin: 0 auto; }
+
+/* The menu button: three shapes, a dot, a diamond and a triangle, in the blend colours */
+.menu-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 42px; padding: 0 12px; border-radius: 13px; cursor: pointer;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+  transition: transform .45s var(--ease), background .3s, border-color .3s, box-shadow .3s; }
+.menu-btn span { display: block; width: 7px; height: 7px; transition: transform .5s var(--ease), background .35s, box-shadow .35s, border-radius .4s; }
+.menu-btn .s1 { border-radius: 50%; background: #a5b4fc; box-shadow: 0 0 6px rgba(165,180,252,.6); }
+.menu-btn .s2 { border-radius: 2px; background: #7dd3fc; transform: rotate(45deg) scale(.9); box-shadow: 0 0 6px rgba(125,211,252,.6); }
+.menu-btn .s3 { background: #5eead4; clip-path: polygon(50% 0, 100% 100%, 0 100%); width: 8px; height: 8px;
+  filter: drop-shadow(0 0 3px rgba(94,234,212,.7)); }
+/* Hover: the shapes bounce in a wave */
+.menu-btn:hover { background: rgba(255,255,255,.14); border-color: rgba(94,234,212,.45); box-shadow: 0 0 16px var(--glow); }
+.menu-btn:hover .s1 { animation: shape-hop .9s var(--ease) infinite; }
+.menu-btn:hover .s2 { animation: shape-hop-d .9s var(--ease) .12s infinite; }
+.menu-btn:hover .s3 { animation: shape-hop .9s var(--ease) .24s infinite; }
+.menu-btn:active { transform: scale(.9); }
+@keyframes shape-hop { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px) scale(1.15); } }
+@keyframes shape-hop-d { 0%, 60%, 100% { transform: rotate(45deg) scale(.9); } 30% { transform: translateY(-4px) rotate(225deg) scale(1.05); } }
+/* Open: the shapes spin and turn white on the blend */
+.nav.open .menu-btn { background: var(--brand-blend); border-color: transparent;
+  box-shadow: 0 4px 16px var(--glow), 0 2px 10px var(--glow-2); }
+.nav.open .menu-btn span { animation: none; background: #fff; box-shadow: 0 0 6px rgba(255,255,255,.8); filter: none; }
+.nav.open .menu-btn .s1 { transform: translateX(3px) scale(.8); }
+.nav.open .menu-btn .s2 { transform: rotate(225deg) scale(1.1); }
+.nav.open .menu-btn .s3 { transform: translateX(-3px) rotate(180deg) scale(.9); }
+
+/* The panel opens over the page instead of pushing it down */
+.nav-menu { display: block; position: absolute; top: 100%; left: 8px; right: 8px;
+  background: var(--nav); border: 1px solid rgba(255,255,255,.08); border-top: 0;
+  border-radius: 0 0 18px 18px; padding: 0 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .35), 0 6px 18px var(--glow);
+  max-height: 0; overflow: hidden; opacity: 0; transform: translateY(-8px); visibility: hidden;
+  transition: max-height .45s var(--ease), opacity .3s, transform .4s var(--ease), padding .3s, visibility 0s .45s; }
+.nav.open .nav-menu { max-height: calc(100vh - 80px); overflow-y: auto; opacity: 1; transform: none;
+  visibility: visible; padding: 12px 12px 14px; transition-delay: 0s; }
+/* Dims the page behind the open menu; tapping it closes the menu */
+.nav-backdrop { display: block; position: fixed; inset: 0; z-index: 15; pointer-events: none;
+  background: rgba(8, 12, 28, .45); backdrop-filter: blur(3px); opacity: 0; transition: opacity .35s var(--ease); }
+.nav.open + .nav-backdrop { opacity: 1; pointer-events: auto; }
+/* Items slide in one after another */
+.nav-menu > * { opacity: 0; transform: translateX(-10px); transition: opacity .3s, transform .35s var(--ease); }
+.nav.open .nav-menu > * { opacity: 1; transform: none; }
+.nav.open .nav-menu > :nth-child(2) { transition-delay: .03s; }
+.nav.open .nav-menu > :nth-child(3) { transition-delay: .06s; }
+.nav.open .nav-menu > :nth-child(4) { transition-delay: .09s; }
+.nav.open .nav-menu > :nth-child(5) { transition-delay: .12s; }
+.nav.open .nav-menu > :nth-child(6) { transition-delay: .15s; }
+.nav.open .nav-menu > :nth-child(7) { transition-delay: .18s; }
+.nav .who { margin-top: 10px; padding: 12px 8px 4px; }
+
+/* Main items and the two groups (Knowledge, Settings) */
+.nav .ico { display: inline-block; width: 24px; margin-right: 6px; text-align: center; filter: saturate(.9); }
+.nav-group-btn { display: flex; align-items: center; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: var(--nav-ink); background: none; border: 0; padding: 9px 12px; border-radius: 10px; margin-bottom: 2px;
+  transition: background .25s var(--ease), color .2s, padding-left .25s var(--ease); }
+.nav-group-btn:hover { background: linear-gradient(90deg, rgba(129,140,248,.16), rgba(45,212,191,.08)); color: #fff; padding-left: 16px; }
+.nav-group-btn.on { color: #fff; }
+.nav-group-btn .chev { margin-left: auto; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); opacity: .7; transition: transform .35s var(--ease); }
+.nav-group.open .chev { transform: rotate(45deg); }
+.nav-sub { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .35s var(--ease); }
+.nav-sub > div { overflow: hidden; }
+.nav-group.open .nav-sub { grid-template-rows: 1fr; }
+.nav-sub a { margin-left: 30px; padding: 7px 12px; font-size: 14.5px; border-left: 1px solid rgba(255,255,255,.12); border-radius: 0 10px 10px 0; }
+.nav-sub a.on { box-shadow: inset 2px 0 0 #5eead4; }
+.who-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.who-row .theme-toggle { margin: 0; }
+.who-links { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.nav .who-links .tour-link { display: inline-block; margin: 0; }
+.nav .who-links form { display: inline; }
+.pin-btn { display: none !important; }
+.pin-btn[aria-pressed="true"] .dot { background: linear-gradient(135deg, #5eead4, #818cf8); }
+
+/* Wide screens: the panel opens under the button on the right, and can be pinned */
+@media (min-width: 861px) {
+  .nav { padding: 10px 28px; }
+  .nav-menu { left: auto; right: 22px; width: 330px; top: calc(100% + 8px); border-top: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px; transform: translateY(-8px) scale(.98); transform-origin: top right; }
+  .pin-btn { display: inline-flex !important; }
+
+  html.nav-pinned .shell { flex-direction: row; }
+  html.nav-pinned .nav { width: 248px; height: 100vh; padding: 22px 14px; box-shadow: none; flex-direction: column; }
+  html.nav-pinned .nav .logo { padding: 0 8px 22px; }
+  html.nav-pinned .menu-btn, html.nav-pinned .nav-backdrop { display: none; }
+  html.nav-pinned .nav-menu { position: static; width: auto; max-height: none; overflow: visible; opacity: 1; visibility: visible;
+    transform: none; padding: 0; background: none; border: 0; box-shadow: none; display: flex; flex-direction: column; flex: 1; }
+  html.nav-pinned .nav-menu > * { opacity: 1; transform: none; }
+  html.nav-pinned .nav .who { margin-top: auto; }
+  html.nav-pinned .main { margin: 0; }
+}
+
+/* Narrow screens */
 @media (max-width: 860px) {
-  .shell { flex-direction: column; }
-  .nav { width: auto; height: auto; position: sticky; top: 0; z-index: 20; padding: 10px 14px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
-  .nav .logo { padding: 0 4px; }
-
-  .menu-btn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-    width: 42px; height: 42px; border-radius: 12px; cursor: pointer; padding: 0;
-    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
-    transition: transform .45s var(--ease), background .3s, border-color .3s, box-shadow .3s; }
-  .menu-btn span { width: 5px; height: 5px; border-radius: 50%; background: #e2e8ff;
-    transition: transform .45s var(--ease), background .35s, box-shadow .35s; }
-  /* Hover: the dots ripple in a wave and pick up the blend colours */
-  .menu-btn:hover { background: rgba(255,255,255,.14); border-color: rgba(94,234,212,.45); box-shadow: 0 0 16px var(--glow); }
-  .menu-btn:hover span { animation: dot-wave .9s var(--ease) infinite; }
-  .menu-btn:hover span:nth-child(1) { background: #a5b4fc; }
-  .menu-btn:hover span:nth-child(2) { background: #7dd3fc; animation-delay: .12s; }
-  .menu-btn:hover span:nth-child(3) { background: #5eead4; animation-delay: .24s; }
-  .menu-btn:active { transform: scale(.9); }
-  /* Open: the button turns sideways and the dots spread out, glowing */
-  .nav.open .menu-btn { transform: rotate(90deg); background: var(--brand-blend); border-color: transparent;
-    box-shadow: 0 4px 16px var(--glow), 0 2px 10px var(--glow-2); }
-  .nav.open .menu-btn span { animation: none; background: #fff; box-shadow: 0 0 6px rgba(255,255,255,.8); }
-  .nav.open .menu-btn span:nth-child(1) { transform: translateY(-2px) scale(1.15); }
-  .nav.open .menu-btn span:nth-child(3) { transform: translateY(2px) scale(1.15); }
-  @keyframes dot-wave { 0%, 60%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px) scale(1.2); } }
-
-  /* The menu drops down over the page instead of pushing it down */
-  .nav-menu { display: block; position: absolute; top: 100%; left: 8px; right: 8px;
-    background: var(--nav); border: 1px solid rgba(255,255,255,.08); border-top: 0;
-    border-radius: 0 0 18px 18px; padding: 0 12px;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, .35), 0 6px 18px var(--glow);
-    max-height: 0; overflow: hidden; opacity: 0; transform: translateY(-8px); visibility: hidden;
-    transition: max-height .45s var(--ease), opacity .3s, transform .4s var(--ease), padding .3s, visibility 0s .45s; }
-  .nav.open .nav-menu { max-height: calc(100vh - 80px); overflow-y: auto; opacity: 1; transform: none;
-    visibility: visible; padding: 10px 12px 14px; transition-delay: 0s; }
-  /* Dims the page behind the open menu; tapping it closes the menu */
-  .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 15; pointer-events: none;
-    background: rgba(8, 12, 28, .45); backdrop-filter: blur(3px); opacity: 0; transition: opacity .35s var(--ease); }
-  .nav.open + .nav-backdrop { opacity: 1; pointer-events: auto; }
-  .nav-menu a { opacity: 0; transform: translateX(-10px);
-    transition: opacity .3s, transform .35s var(--ease), background .25s, padding-left .25s var(--ease); }
-  .nav.open .nav-menu a { opacity: 1; transform: none; }
-  .nav.open .nav-menu a:nth-of-type(1) { transition-delay: .03s; }
-  .nav.open .nav-menu a:nth-of-type(2) { transition-delay: .06s; }
-  .nav.open .nav-menu a:nth-of-type(3) { transition-delay: .09s; }
-  .nav.open .nav-menu a:nth-of-type(4) { transition-delay: .12s; }
-  .nav.open .nav-menu a:nth-of-type(5) { transition-delay: .15s; }
-  .nav.open .nav-menu a:nth-of-type(6) { transition-delay: .18s; }
-  .nav.open .nav-menu a:nth-of-type(7) { transition-delay: .21s; }
-  .nav.open .nav-menu a:nth-of-type(8) { transition-delay: .24s; }
-  .nav.open .nav-menu a:hover { transition-delay: 0s; }
-  .nav .who { margin-top: 10px; padding: 12px 12px 4px; }
+  .nav { padding: 10px 14px; }
   .main { padding: 20px 16px 40px; }
   .cols, .half { grid-template-columns: 1fr; }
   .outside::before { height: 190px; }
@@ -441,7 +492,6 @@ html.is-loading.is-slow .loader-card { opacity: 1; transform: none; }
 .nav-search input { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.12); color: #fff; padding: 8px 11px; font-size: 14px; }
 .nav-search input::placeholder { color: #9fb0d4; }
 .nav-search input:focus { background: rgba(255,255,255,.1); }
-@media (max-width: 860px) { .nav.open .nav-menu a:nth-of-type(9) { transition-delay: .27s; } }
 
 /* Priority and response targets */
 .tag.prio-urgent { background: var(--bad-soft); color: var(--bad); border-color: var(--bad-line); }
@@ -678,6 +728,47 @@ td .badge-chip { margin: 3px 0 0; }
   .gauges { grid-template-columns: 1fr 1fr; }
   .toasts { left: 16px; right: 16px; bottom: 12px; max-width: none; }
 }
+
+/* ===================== Account, Settings, About ===================== */
+.nav a.me { display: flex; padding: 6px 8px; margin: 10px -8px 2px; color: var(--nav-ink); }
+.nav a.me:hover { padding-left: 8px; }
+.section-title { font-size: 15px; color: var(--muted); font-weight: 600; margin: 4px 0 10px; }
+.account-head h1 { margin-bottom: 2px; }
+.account-head .who-cell { align-items: center; gap: 16px; }
+
+.segmented { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); flex-wrap: wrap; }
+.segmented button { font: inherit; font-size: 14px; font-weight: 600; padding: 7px 14px; border-radius: 9px; border: 0; cursor: pointer;
+  background: transparent; color: var(--muted); transition: background-color .2s, color .2s, box-shadow .25s var(--ease); }
+.segmented button:hover { color: var(--ink); }
+.segmented button[aria-pressed="true"] { background: var(--brand-blend); color: #fff; box-shadow: 0 3px 10px var(--glow); }
+
+/* On/off switches */
+.check.switch { align-items: center; gap: 12px; }
+.check.switch input { appearance: none; -webkit-appearance: none; margin: 0; flex: 0 0 auto; width: 42px; height: 24px; border-radius: 99px;
+  background: var(--field); position: relative; cursor: pointer; transition: background-color .25s var(--ease); }
+.check.switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .25s var(--ease); }
+.check.switch input:checked { background: linear-gradient(135deg, var(--blend-a), var(--blend-c)); }
+.check.switch input:checked::after { transform: translateX(18px); }
+.check.switch input:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--glow); }
+
+.settings-links { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.settings-links a { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; padding: 12px 14px;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); text-decoration: none;
+  transition: transform .2s var(--ease), border-color .2s, box-shadow .25s var(--ease); }
+.settings-links a:hover { transform: translateY(-2px); border-color: var(--brand); box-shadow: 0 6px 14px var(--glow); text-decoration: none; }
+.settings-links span { grid-row: span 2; font-size: 22px; }
+.settings-links small { color: var(--muted); font-size: 12px; }
+.targets { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 14px; }
+.danger-zone { border-color: var(--bad-line); }
+
+.about-by { margin: -4px 0 18px; }
+.about-story p { line-height: 1.7; }
+.about-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.about-grid > div { padding: 14px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.about-grid span { font-size: 26px; display: block; margin-bottom: 6px; }
+.about-grid p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+.support-line { margin: 0 0 8px; font-weight: 600; }
 
 /* People who turn off motion in their system settings get a still page. */
 @media (prefers-reduced-motion: reduce) {

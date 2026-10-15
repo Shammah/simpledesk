@@ -7,6 +7,8 @@
 <script>
   // Apply a saved light/dark choice before the page draws, so it never flashes.
   try { var t = localStorage.getItem("theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+  // Menu pinned open as a sidebar (wide screens only), else folded behind the menu button.
+  try { if (localStorage.getItem("navPinned") === "1") document.documentElement.classList.add("nav-pinned"); } catch (e) {}
   // Opened from the Play Store app: remember it, so plan payments stay hidden.
   if (document.referrer.indexOf("android-app://") === 0 && document.cookie.indexOf("shell=android") < 0) {
     document.cookie = "shell=android; max-age=31536000; path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
@@ -64,34 +66,53 @@
 <div class="shell">
   <nav class="nav">
     <div class="nav-top">
-      <div class="logo"><span class="mark"></span>{{ app_name }}</div>
+      <a class="logo" href="{{ url_for('dashboard') }}"><span class="mark"></span>{{ app_name }}</a>
       <button type="button" class="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="nav-menu">
-        <span></span><span></span><span></span>
+        <span class="s1"></span><span class="s2"></span><span class="s3"></span>
       </button>
     </div>
     <div class="nav-menu" id="nav-menu">
     {% set here = request.endpoint %}
+    {% set knowledge = here in ('guides', 'guide_edit', 'saved_replies', 'checklist_templates') %}
+    {% set setup = here in ('settings', 'team', 'channels_page', 'privacy') %}
     <form method="get" action="{{ url_for('search') }}" class="nav-search" role="search">
       <input type="search" name="q" placeholder="Search or #ticket" aria-label="Search tickets, people, devices and guides" value="{{ q if here == 'search' else '' }}">
     </form>
-    <a href="{{ url_for('dashboard') }}" class="{{ 'on' if here == 'dashboard' }}">Dashboard</a>
-    <a href="{{ url_for('tickets') }}" class="{{ 'on' if here in ('tickets', 'ticket') }}">Tickets
+    <a href="{{ url_for('dashboard') }}" class="{{ 'on' if here == 'dashboard' }}"><span class="ico" aria-hidden="true">📊</span>Dashboard</a>
+    <a href="{{ url_for('tickets') }}" class="{{ 'on' if here in ('tickets', 'ticket') }}"><span class="ico" aria-hidden="true">🎫</span>Tickets
       <span class="nav-count" data-live-open {{ 'hidden' if not nav_open }}>{{ nav_open }}</span></a>
-    <a href="{{ url_for('companies') }}" class="{{ 'on' if here in ('companies', 'company', 'checklist', 'company_report') }}">Companies</a>
-    <a href="{{ url_for('guides') }}" class="{{ 'on' if here in ('guides', 'guide_edit') }}">Guides</a>
-    <a href="{{ url_for('saved_replies') }}" class="{{ 'on' if here == 'saved_replies' }}">Saved replies</a>
-    <a href="{{ url_for('checklist_templates') }}" class="{{ 'on' if here == 'checklist_templates' }}">Checklists</a>
-    <a href="{{ url_for('channels_page') }}" class="{{ 'on' if here == 'channels_page' }}">Channels</a>
-    <a href="{{ url_for('team') }}" class="{{ 'on' if here == 'team' }}">Team &amp; plan</a>
-    <a href="{{ url_for('privacy') }}" class="{{ 'on' if here == 'privacy' }}">Privacy &amp; data</a>
+    <a href="{{ url_for('companies') }}" class="{{ 'on' if here in ('companies', 'company', 'checklist', 'company_report') }}"><span class="ico" aria-hidden="true">🏢</span>Companies</a>
+    <div class="nav-group{{ ' open' if knowledge }}" data-group="knowledge">
+      <button type="button" class="nav-group-btn{{ ' on' if knowledge }}" aria-expanded="{{ 'true' if knowledge else 'false' }}"><span class="ico" aria-hidden="true">📚</span>Knowledge<span class="chev" aria-hidden="true"></span></button>
+      <div class="nav-sub"><div>
+        <a href="{{ url_for('guides') }}" class="{{ 'on' if here in ('guides', 'guide_edit') }}">Guides</a>
+        <a href="{{ url_for('saved_replies') }}" class="{{ 'on' if here == 'saved_replies' }}">Saved replies</a>
+        <a href="{{ url_for('checklist_templates') }}" class="{{ 'on' if here == 'checklist_templates' }}">Checklists</a>
+      </div></div>
+    </div>
+    <div class="nav-group{{ ' open' if setup }}" data-group="settings">
+      <button type="button" class="nav-group-btn{{ ' on' if setup }}" aria-expanded="{{ 'true' if setup else 'false' }}"><span class="ico" aria-hidden="true">⚙️</span>Settings<span class="chev" aria-hidden="true"></span></button>
+      <div class="nav-sub"><div>
+        <a href="{{ url_for('settings') }}" class="{{ 'on' if here == 'settings' }}">General</a>
+        <a href="{{ url_for('team') }}" class="{{ 'on' if here == 'team' }}">Team &amp; plan</a>
+        <a href="{{ url_for('channels_page') }}" class="{{ 'on' if here == 'channels_page' }}">Channels</a>
+        <a href="{{ url_for('privacy') }}" class="{{ 'on' if here == 'privacy' }}">Privacy &amp; data</a>
+      </div></div>
+    </div>
     <div class="who">
-      <button type="button" class="theme-toggle install-btn" hidden><span class="dot"></span>Install app</button>
-      <button type="button" class="theme-toggle"><span class="dot"></span><span class="label">Dark mode</span></button>
-      <button type="button" class="theme-toggle sound-toggle" aria-pressed="true"><span class="dot"></span><span class="label">Sound on</span></button>
-      <div class="me">{{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'sm') }}
-        <div>{{ g.tech.name }}<br><span class="muted">{{ g.provider.name }}</span></div></div>
-      <a href="{{ url_for('dashboard', tour=1) }}" class="tour-link">Take the tour</a>
-      <form method="post" action="{{ url_for('logout') }}">{{ csrf() }}<button>Sign out</button></form>
+      <a class="me{{ ' on' if here == 'account' }}" href="{{ url_for('account') }}" title="Your account">{{ avatar(g.tech.name, url_for('tech_photo', tech_id=g.tech.id) if g.tech.photo else None, 'sm') }}
+        <div>{{ g.tech.name }}<br><span class="muted">Your account · {{ g.provider.name }}</span></div></a>
+      <div class="who-row">
+        <button type="button" class="theme-toggle install-btn" hidden><span class="dot"></span>Install app</button>
+        <button type="button" class="theme-toggle"><span class="dot"></span><span class="label">Dark mode</span></button>
+        <button type="button" class="theme-toggle sound-toggle" aria-pressed="true"><span class="dot"></span><span class="label">Sound on</span></button>
+        <button type="button" class="theme-toggle pin-btn" aria-pressed="false"><span class="dot"></span><span class="label">Keep menu open</span></button>
+      </div>
+      <div class="who-links">
+        <a href="{{ url_for('dashboard', tour=1) }}" class="tour-link">Take the tour</a>
+        <a href="{{ url_for('about') }}" class="tour-link">About us</a>
+        <form method="post" action="{{ url_for('logout') }}">{{ csrf() }}<button>Sign out</button></form>
+      </div>
     </div>
     </div>
   </nav>
@@ -111,7 +132,9 @@
     {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="flash"{% if cat == 'celebrate' %} data-celebrate{% endif %}>{{ m }}</div>{% endfor %}
     {{ self.content() }}
   </div>
-  <footer class="site-foot"><a href="{{ url_for('privacy_policy') }}">Privacy policy</a></footer>
+  <footer class="site-foot">
+    {% if public and c and c.provider_id %}{% set pv = provider_contact(c.provider_id) %}{% if pv and pv.support_phone %}<p class="support-line">Urgent? Call <a href="tel:{{ pv.support_phone|replace(' ', '') }}">{{ pv.support_phone }}</a>{% if pv.support_hours %} · {{ pv.support_hours }}{% endif %}</p>{% endif %}{% endif %}
+    <a href="{{ url_for('about') }}">About us</a> · <a href="{{ url_for('privacy_policy') }}">Privacy policy</a></footer>
 </div>
 {% endif %}
 </body>

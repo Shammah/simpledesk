@@ -119,6 +119,13 @@ pay on the website.
   emailed automatically on the 1st of each month.
 - **Search** (top of the menu; `#12` jumps to ticket 12), **saved replies**,
   and a **satisfaction rating** when a request is closed.
+- **Account** (click your name in the menu): profile, photo, password, email
+  alerts, your month's numbers, and "sign out all other devices".
+- **Settings:** business name, billing email, the support phone and hours shown
+  on clients' help pages, theme/sound/confetti for this device, your data
+  download, and deleting the business account.
+- **About us** (`/about`, public): write your own story in `ABOUT_STORY` in
+  `config.py`; it stays hidden until you do.
 
 Reminders, renewals, overdue alerts and automatic reports run in the
 background every 15 minutes: inside `python app.py` on this computer, and in

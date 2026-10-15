@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Settings - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Settings</h1>
+  <p class="muted">{{ g.provider.name }} · {{ counts[0] }} client compan{{ 'y' if counts[0] == 1 else 'ies' }} · {{ counts[1] }} ticket{{ 's' if counts[1] != 1 }} · {{ counts[2] }} technician{{ 's' if counts[2] != 1 }}</p></div>
+  <a class="btn ghost fit" href="{{ url_for('account') }}">Your account</a>
+</div>
+
+<div class="half">
+  <div class="card">
+    <h2>Business</h2>
+    {% if owner %}
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="action" value="business">
+      <div class="field"><label for="business_name">Business name</label><input type="text" id="business_name" name="business_name" value="{{ g.provider.name }}" maxlength="100" required></div>
+      <div class="field"><label for="billing_email">Billing email <span class="muted">(receipts and payment reminders)</span></label>
+        <input type="email" id="billing_email" name="billing_email" value="{{ g.provider.billing_email }}" placeholder="{{ g.tech.email }}"></div>
+      <div class="row">
+        <div><label for="support_phone">Support phone</label><input type="text" id="support_phone" name="support_phone" value="{{ g.provider.support_phone }}" placeholder="+254 712 345 678" inputmode="tel" maxlength="40"></div>
+        <div><label for="support_hours">Support hours</label><input type="text" id="support_hours" name="support_hours" value="{{ g.provider.support_hours }}" placeholder="Mon–Fri, 8am–6pm" maxlength="80"></div>
+      </div>
+      <p class="small muted" style="margin:8px 0 12px">The phone and hours appear on your clients' help pages: "Urgent? Call …".</p>
+      <button class="btn ghost fit">Save</button>
+    </form>
+    {% else %}
+    <p><strong>{{ g.provider.name }}</strong></p>
+    {% if g.provider.support_phone %}<p class="muted">Support line: {{ g.provider.support_phone }}{% if g.provider.support_hours %}, {{ g.provider.support_hours }}{% endif %}</p>{% endif %}
+    <p class="small muted">Only the account owner can change business details.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Appearance and sound</h2>
+    <p class="small muted">Saved on this device.</p>
+    <fieldset class="field choice">
+      <legend>Theme</legend>
+      <div class="segmented" data-pref="theme">
+        <button type="button" data-value="system">🖥 System</button>
+        <button type="button" data-value="light">☀️ Light</button>
+        <button type="button" data-value="dark">🌙 Dark</button>
+      </div>
+    </fieldset>
+    <label class="check switch"><input type="checkbox" data-pref="sound"> Chime when a new ticket needs you</label>
+    <label class="check switch"><input type="checkbox" data-pref="celebrate"> Confetti and celebrations</label>
+    <button type="button" class="btn ghost fit" data-test-chime style="margin-top:6px">Play the chime</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Workspace</h2>
+  <div class="settings-links">
+    <a href="{{ url_for('team') }}"><span>👥</span><strong>Team &amp; plan</strong><small>Technicians, invites{{ ', billing' if not g.android }}</small></a>
+    <a href="{{ url_for('channels_page') }}"><span>📨</span><strong>Channels</strong><small>Email, WhatsApp, payments set-up</small></a>
+    <a href="{{ url_for('saved_replies') }}"><span>💬</span><strong>Saved replies</strong><small>Answers you give often</small></a>
+    <a href="{{ url_for('checklist_templates') }}"><span>✅</span><strong>Checklists</strong><small>Starters and leavers</small></a>
+    <a href="{{ url_for('guides') }}"><span>📘</span><strong>Guides</strong><small>What the automatic answers use</small></a>
+    <a href="{{ url_for('privacy') }}"><span>🔒</span><strong>Privacy &amp; data</strong><small>What's stored and the AI's limits</small></a>
+    <a href="{{ url_for('dashboard', tour=1) }}"><span>🧭</span><strong>Take the tour</strong><small>A one-minute walk-through</small></a>
+    <a href="{{ url_for('about') }}"><span>💡</span><strong>About {{ app_name }}</strong><small>Who we are, how to reach us</small></a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Response targets</h2>
+  <p class="small muted">How quickly a technician should first reply once a ticket comes to you.</p>
+  <div class="targets">
+    {% for key, p in priorities.items() %}<div><span class="tag prio-{{ key }}">{{ p.label }}</span> within {{ p.hours }} hour{{ 's' if p.hours != 1 }}</div>{% endfor %}
+  </div>
+</div>
+
+{% if owner %}
+<div class="card danger-zone">
+  <h2>Your data</h2>
+  <p class="small muted">Download everything: every client's tickets, conversations, people, devices, guides, time and attachments.</p>
+  <a class="btn ghost fit" href="{{ url_for('export_all') }}" data-no-loader>Download all data</a>
+
+  <h2 style="margin-top:24px">Delete business account</h2>
+  <p class="small muted">Permanently deletes {{ g.provider.name }}, all technicians, client companies, tickets, files and billing history. This cannot be undone, so download your data first.</p>
+  <form method="post" class="row" data-confirm="Delete {{ g.provider.name }} and everything in it for good?" onsubmit="return confirm(this.dataset.confirm)">
+    {{ csrf() }}<input type="hidden" name="action" value="delete_business">
+    <div><label for="confirm">Type “{{ g.provider.name }}”</label><input type="text" id="confirm" name="confirm" autocomplete="off" required></div>
+    <div><label for="del_password">Your password</label><input type="password" id="del_password" name="password" required autocomplete="current-password"></div>
+    <button class="btn danger fit">Delete everything</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

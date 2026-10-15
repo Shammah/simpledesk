@@ -175,6 +175,11 @@ MIGRATIONS = [
     ("tickets", "tech_typing_until", "TEXT"),
     ("tickets", "tech_typing_name", "TEXT NOT NULL DEFAULT ''"),
     ("tickets", "user_typing_until", "TEXT"),
+    # Changing this signs a technician out of every other device.
+    ("technicians", "session_key", "TEXT NOT NULL DEFAULT ''"),
+    # Shown on clients' help pages: "Urgent? Call ..."
+    ("providers", "support_phone", "TEXT NOT NULL DEFAULT ''"),
+    ("providers", "support_hours", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 # Tables added after the first version.

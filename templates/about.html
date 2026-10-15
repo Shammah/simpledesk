@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}About us - {{ app_name }}{% endblock %}
+{% block wrap %}public{% endblock %}
+{% block content %}
+<h1>About {{ app_name }}</h1>
+<p class="muted">IT support for every business you look after, in one simple place.</p>
+<p class="small muted about-by">By {{ business }}{% if location %} · {{ location }}{% endif %}</p>
+
+{% if story.strip() %}
+<div class="card about-story">
+  <h2>Our story</h2>
+  {% for para in story.strip().split('\n\n') %}<p>{{ para }}</p>{% endfor %}
+</div>
+{% elif g.tech and g.tech.role == 'owner' %}
+<div class="note">Only you can see this: write your own story in <strong>ABOUT_STORY</strong> in <code>config.py</code> and it appears here.</div>
+{% endif %}
+
+<div class="card">
+  <h2>What it does</h2>
+  <div class="about-grid">
+    <div><span>💬</span><strong>One place for every request</strong><p>Staff ask by help link, email or WhatsApp. Every request is tied to the person and their device.</p></div>
+    <div><span>⚡</span><strong>Instant answers</strong><p>Common problems are answered straight away from your own guides, with a technician one tap away.</p></div>
+    <div><span>⏱</span><strong>Promises kept</strong><p>Priorities, reply deadlines and alerts make sure nothing waits too long.</p></div>
+    <div><span>📊</span><strong>Proof of value</strong><p>Monthly reports show clients what was fixed, how fast, and the time spent.</p></div>
+    <div><span>🔒</span><strong>Private by design</strong><p>Each client's data is kept apart, passwords are stripped from messages, and everything can be downloaded.</p></div>
+    <div><span>📱</span><strong>Made for Kenya</strong><p>Priced in shillings, paid with M-Pesa or card, and built for WhatsApp.</p></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Get in touch</h2>
+  <p>Questions, ideas or problems: <a href="mailto:{{ contact }}">{{ contact }}</a></p>
+  <p class="small muted"><a href="{{ url_for('privacy_policy') }}">Privacy policy</a>{% if not g.tech %} · <a href="{{ url_for('signup') }}">Create an account</a> · <a href="{{ url_for('login') }}">Sign in</a>{% endif %}</p>
+</div>
+{% endblock %}
