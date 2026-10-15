@@ -3,7 +3,7 @@
 // Only the design files (styles, script, icons) are kept on the device.
 // Pages with tickets or client details are never stored, so nothing private
 // stays on a phone after someone signs out.
-const CACHE = "simpledesk-v1";
+const CACHE = "simpledesk-v2";
 const KEEP = [
   "/static/style.css",
   "/static/app.js",

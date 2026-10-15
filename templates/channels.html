@@ -12,6 +12,7 @@
   <div class="stat"><div class="n"><span class="tag {{ 'good' if email_out else '' }}">{{ 'On' if email_out else 'Off' }}</span></div><div class="l">Sending email{% if email_out %} as {{ email_out }}{% endif %}</div></div>
   <div class="stat"><div class="n"><span class="tag {{ 'good' if email_in else '' }}">{{ 'On' if email_in else 'Off' }}</span></div><div class="l">Receiving email{% if email_in %} at {{ email_in }}{% endif %}</div></div>
   <div class="stat"><div class="n"><span class="tag {{ 'good' if whatsapp else '' }}">{{ 'On' if whatsapp else 'Off' }}</span></div><div class="l">WhatsApp</div></div>
+  <div class="stat"><div class="n"><span class="tag {{ 'good' if paystack else '' }}">{{ 'On' if paystack else 'Off' }}</span></div><div class="l">Plan payments (Paystack){% if paystack_test %}, <strong>test keys</strong>{% endif %}</div></div>
 </div>
 
 <div class="half">
@@ -38,6 +39,12 @@
     <p class="small muted" style="margin-top:8px">This is a local address that Meta cannot reach. Set <strong>public_url</strong> in data/channels.ini once the app is hosted with HTTPS.</p>
     {% endif %}
   </div>
+</div>
+
+<div class="card">
+  <h2>Plan payments</h2>
+  <p class="small muted">Customers pay for the Team plan with M-Pesa or card through Paystack. Put your secret key in the <strong>[paystack]</strong> section of data/channels.ini, then paste this address into Paystack under Settings &gt; API Keys &amp; Webhooks &gt; Webhook URL:</p>
+  <div class="copy">{{ paystack_webhook }}</div>
 </div>
 
 <div class="card">

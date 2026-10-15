@@ -219,3 +219,5 @@ are blanked before anything is sent.
 | Restart after changing settings | `systemctl restart simpledesk simpledesk-mail` |
 | When is the next backup? | `systemctl list-timers simpledesk-backup` |
 | Disk space | `df -h /` |
+| Edit email, WhatsApp and Paystack settings | `nano /var/lib/simpledesk/channels.ini` (then restart) |
+| Password link for a locked-out account | `sudo -u simpledesk bash -c 'set -a; . /etc/simpledesk.env; /opt/simpledesk/venv/bin/python /opt/simpledesk/app/tools/reset_link.py someone@example.com'` |

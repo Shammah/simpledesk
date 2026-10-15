@@ -1,7 +1,8 @@
 """Daily backup of SimpleDesk.
 
 Makes one zip file holding a safe copy of the database (taken while the app
-keeps running), the email/WhatsApp settings and the sign-in key. Checks the
+keeps running), the email/WhatsApp/payment settings, the sign-in key and the
+pictures attached to tickets. Checks the
 copy is not damaged, then deletes backups older than BACKUP_KEEP_DAYS.
 
 Run by hand:      .venv\\Scripts\\python.exe tools\\backup.py
@@ -48,10 +49,15 @@ def make_backup():
                 path = config.DATA_DIR / extra
                 if path.exists():
                     z.write(path, extra)
+            # Pictures and files attached to tickets. Already compressed, so stored as they are.
+            if config.UPLOAD_DIR.exists():
+                for path in sorted(config.UPLOAD_DIR.iterdir()):
+                    if path.is_file():
+                        z.write(path, f"uploads/{path.name}", compress_type=zipfile.ZIP_STORED)
             z.writestr("RESTORE.txt",
                        "To restore: stop SimpleDesk, put these files back in the data folder\n"
-                       "(helpdesk.db, channels.ini, secret.key), delete any helpdesk.db-wal and\n"
-                       "helpdesk.db-shm files there, then start SimpleDesk again.\n")
+                       "(helpdesk.db, channels.ini, secret.key and the uploads folder), delete any\n"
+                       "helpdesk.db-wal and helpdesk.db-shm files there, then start SimpleDesk again.\n")
     return target
 
 

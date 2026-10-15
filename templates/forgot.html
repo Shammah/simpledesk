@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Forgot password - {{ app_name }}{% endblock %}
+{% block content %}
+<h1>Forgot your password?</h1>
+<p class="muted">Enter your email and we'll send you a link to choose a new one.</p>
+<form method="post" class="card">
+  {{ csrf() }}
+  <div class="field"><label for="email">Email</label><input type="email" id="email" name="email" required autofocus></div>
+  <button class="btn">Send reset link</button>
+</form>
+<p class="small"><a href="{{ url_for('login') }}">Back to sign in</a></p>
+{% endblock %}

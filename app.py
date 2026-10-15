@@ -2,7 +2,9 @@
 
 Run:  python app.py   then open http://127.0.0.1:5000
 """
+import calendar
 import csv
+import hashlib
 import io
 import json
 import re
@@ -24,11 +26,14 @@ import ai
 import channels
 import config
 import db
+import files
 import monitoring
+import payments
 
 monitoring.init("web")   # error alerts, only when SENTRY_DSN is set
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
+# Room for a few attached pictures per message.
+app.config["MAX_CONTENT_LENGTH"] = (config.MAX_FILE_MB * config.MAX_FILES_PER_MESSAGE + 1) * 1024 * 1024
 
 
 def _secret_key():
@@ -67,12 +72,14 @@ def before():
         g.tech = g.db.execute(
             "SELECT * FROM technicians WHERE id = ? AND active = 1",
             (session["tech_id"],)).fetchone()
-        if g.tech:
+        # Changing the password signs out every other device.
+        if g.tech and session.get("pw") == password_stamp(g.tech):
             g.provider = g.db.execute(
                 "SELECT * FROM providers WHERE id = ?", (g.tech["provider_id"],)).fetchone()
         else:
+            g.tech = None
             session.clear()
-    if request.method == "POST" and request.endpoint != "whatsapp_webhook":
+    if request.method == "POST" and request.endpoint not in ("whatsapp_webhook", "paystack_webhook"):
         token = session.get("csrf")
         if not token or not secrets.compare_digest(token, request.form.get("csrf", "")):
             abort(400, "This form has expired. Go back, refresh the page, and try again.")
@@ -104,6 +111,49 @@ def csrf_field():
     return Markup(f'<input type="hidden" name="csrf" value="{csrf_token()}">')
 
 
+def password_stamp(tech):
+    return hashlib.sha256(tech["password_hash"].encode()).hexdigest()[:16]
+
+
+def sign_in(tech):
+    session.clear()
+    session["tech_id"] = tech["id"]
+    session["pw"] = password_stamp(tech)
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def parse_time(value):
+    return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+def fmt_time(moment):
+    return moment.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def money(amount):
+    return f"{config.CURRENCY} {amount:,.0f}"
+
+
+def hours(minutes):
+    """90 -> '1h 30m'."""
+    minutes = int(minutes or 0)
+    return f"{minutes // 60}h {minutes % 60:02d}m" if minutes >= 60 else f"{minutes}m"
+
+
+def due_label(t):
+    """'Late by 2 hours' / 'Reply due in 3 hours' for an open ticket, else ''."""
+    if t["status"] != "open" or not t["due_at"] or t["target_met"] is not None:
+        return ""
+    seconds = (parse_time(t["due_at"]) - utcnow()).total_seconds()
+    span = abs(seconds)
+    text = (f"{int(span // 3600)} hour{'s' if span >= 7200 else ''}" if span >= 3600
+            else f"{max(int(span // 60), 1)} min")
+    return f"Late by {text}" if seconds < 0 else f"Reply due in {text}"
+
+
 def ago(value):
     if not value:
         return ""
@@ -117,9 +167,11 @@ def ago(value):
             return f"{n} {unit}{'s' if n != 1 else ''} ago"
 
 
-app.jinja_env.filters["ago"] = ago
+app.jinja_env.filters.update(ago=ago, money=money, hours=hours)
 app.jinja_env.globals.update(csrf=csrf_field, csrf_token=csrf_token, app_name=config.APP_NAME,
-                             currency=config.CURRENCY)
+                             currency=config.CURRENCY, priorities=config.PRIORITIES,
+                             due_label=due_label, file_accept=files.ACCEPT,
+                             max_files=config.MAX_FILES_PER_MESSAGE, max_file_mb=config.MAX_FILE_MB)
 
 STATUS_LABELS = {"ai_answered": "AI answered", "open": "Needs technician", "resolved": "Resolved"}
 app.jinja_env.globals["status_labels"] = STATUS_LABELS
@@ -189,10 +241,52 @@ def billing(provider):
         "SELECT COUNT(*) FROM ai_usage WHERE provider_id = ? AND created_at >= ?",
         (provider["id"], month_start())).fetchone()[0]
     allowance = plan["ai_replies_per_tech"] * max(seats, 1)
+    # Payment state of the Team plan: paid, due (in the grace days) or none.
+    state, days_left = "none", None
+    if provider["plan"] == "pro" and provider["paid_until"]:
+        left = parse_time(provider["paid_until"]) - utcnow()
+        days_left = left.days
+        state = "paid" if left.total_seconds() > 0 else "due"
     return dict(plan=plan, plan_key=provider["plan"], seats=seats,
-                monthly_cost=plan["price_per_tech"] * seats,
+                monthly_cost=config.PLANS["pro"]["price_per_tech"] * max(seats, 1)
+                if provider["plan"] == "pro" else 0,
+                team_cost=config.PLANS["pro"]["price_per_tech"] * max(seats, 1),
                 ai_used=used, ai_allowance=allowance,
-                ai_left=max(allowance - used, 0))
+                ai_left=max(allowance - used, 0),
+                pay_state=state, days_left=days_left, paid_until=provider["paid_until"])
+
+
+def apply_payment(reference, tx):
+    """Record a successful Paystack payment once, and extend the Team plan.
+
+    Called from both the return page and the webhook; whichever comes first
+    does the work. Returns the payment row, or None if nothing applied.
+    """
+    pay = g.db.execute("SELECT * FROM payments WHERE reference = ?", (reference,)).fetchone()
+    if (not pay or tx.get("status") != "success" or tx.get("currency") != "KES"
+            or int(tx.get("amount", 0)) < pay["amount"] * 100):
+        return None
+    claimed = g.db.execute("UPDATE payments SET status = 'paid', paid_at = ?, method = ?"
+                           " WHERE id = ? AND status = 'pending'",
+                           (db.now(), payments.describe(tx), pay["id"])).rowcount
+    if not claimed:
+        return None             # already applied
+    provider = g.db.execute("SELECT * FROM providers WHERE id = ?", (pay["provider_id"],)).fetchone()
+    start = utcnow()
+    if provider["plan"] == "pro" and provider["paid_until"]:
+        start = max(start, parse_time(provider["paid_until"]))
+    until = start + timedelta(days=config.DAYS_PER_MONTH_PAID * pay["months"])
+    auth = tx.get("authorization") or {}
+    card = auth.get("reusable") and auth.get("channel") == "card" and auth.get("authorization_code")
+    email = (tx.get("customer") or {}).get("email") or provider["billing_email"]
+    g.db.execute(
+        "UPDATE providers SET plan = 'pro', paid_until = ?, billing_email = ?, billing_notice = '',"
+        " card_code = CASE WHEN ? != '' THEN ? ELSE card_code END,"
+        " card_label = CASE WHEN ? != '' THEN ? ELSE card_label END WHERE id = ?",
+        (fmt_time(until), email, card or "", card or "", card and payments.describe(tx) or "",
+         card and payments.describe(tx) or "", provider["id"]))
+    g.db.commit()
+    return pay
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +387,7 @@ def signup():
                 " VALUES (?, ?, ?, ?, 'owner', ?)",
                 (provider_id, name, email, generate_password_hash(password), db.now()))
             g.db.commit()
-            session.clear()
-            session["tech_id"] = cur.lastrowid
+            sign_in(g.db.execute("SELECT * FROM technicians WHERE id = ?", (cur.lastrowid,)).fetchone())
             return redirect(url_for("dashboard"))     # where the welcome tour starts
     return render_template("signup.html")
 
@@ -307,12 +400,107 @@ def login():
         email = request.form.get("email", "").strip().lower()
         row = g.db.execute("SELECT * FROM technicians WHERE email = ? AND active = 1",
                            (email,)).fetchone()
-        if row and check_password_hash(row["password_hash"], request.form.get("password", "")):
-            session.clear()
-            session["tech_id"] = row["id"]
+        # An invited technician has no password until they open their invite link.
+        if (row and row["password_hash"]
+                and check_password_hash(row["password_hash"], request.form.get("password", ""))):
+            sign_in(row)
             return redirect(url_for("dashboard"))
         flash("Email or password is not right.")
     return render_template("login.html")
+
+
+# ---- Password reset and invites: one-time links sent by email ----
+
+def make_link(tech_id, kind):
+    """Create a one-time sign-in link. Only a fingerprint of it is stored."""
+    token = secrets.token_urlsafe(24)
+    life = (timedelta(hours=config.RESET_LINK_HOURS) if kind == "reset"
+            else timedelta(days=config.INVITE_LINK_DAYS))
+    g.db.execute("UPDATE sign_in_links SET used_at = ? WHERE tech_id = ? AND used_at IS NULL",
+                 (db.now(), tech_id))       # an older link stops working
+    g.db.execute("INSERT INTO sign_in_links (tech_id, kind, token_hash, expires_at, created_at)"
+                 " VALUES (?, ?, ?, ?, ?)",
+                 (tech_id, kind, hashlib.sha256(token.encode()).hexdigest(),
+                  fmt_time(utcnow() + life), db.now()))
+    return f"{channels.public_url()}{url_for('set_password', token=token)}"
+
+
+def find_link(token):
+    return g.db.execute(
+        "SELECT l.*, t.name, t.email, t.provider_id FROM sign_in_links l"
+        " JOIN technicians t ON t.id = l.tech_id"
+        " WHERE l.token_hash = ? AND l.used_at IS NULL AND l.expires_at > ? AND t.active = 1",
+        (hashlib.sha256(token.encode()).hexdigest(), db.now())).fetchone()
+
+
+def send_in_background(to, subject, body):
+    """Send an email without making the person on the page wait for it."""
+    def run():
+        error = channels.send_email(to, subject, body)
+        if error:
+            app.logger.error("Could not send email '%s': %s", subject, error)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def link_email(tech, kind, url):
+    """The subject and text of a reset or invite email."""
+    business = g.db.execute("SELECT name FROM providers WHERE id = ?", (tech["provider_id"],)).fetchone()[0]
+    if kind == "invite":
+        subject = f"You're invited to {business} on {config.APP_NAME}"
+        body = (f"Hello {tech['name']},\n\n{business} has added you as a technician on {config.APP_NAME}.\n"
+                f"Choose your password here to get started:\n\n{url}\n\n"
+                f"This link works once and expires in {config.INVITE_LINK_DAYS} days.")
+    else:
+        subject = f"Reset your {config.APP_NAME} password"
+        body = (f"Hello {tech['name']},\n\nSomeone asked to reset your {config.APP_NAME} password. "
+                f"To choose a new one, open:\n\n{url}\n\nThis link works once and expires in "
+                f"{config.RESET_LINK_HOURS} hour. If you didn't ask for this, ignore this email: "
+                "your password stays the same.")
+    return subject, body
+
+
+@app.route("/forgot", methods=["GET", "POST"])
+def forgot():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        tech = g.db.execute("SELECT * FROM technicians WHERE email = ? AND active = 1 AND password_hash != ''",
+                            (email,)).fetchone()
+        if not channels.email_out():
+            flash("Password emails aren't set up on this server yet. Ask your account owner to "
+                  "create a reset link for you on the Team page.")
+            return redirect(url_for("forgot"))
+        if tech:
+            subject, body = link_email(tech, "reset", make_link(tech["id"], "reset"))
+            g.db.commit()
+            send_in_background(tech["email"], subject, body)
+        # Same answer either way, so nobody can test which emails have accounts.
+        flash("If that email has an account, a reset link is on its way. Check your inbox and spam folder.")
+        return redirect(url_for("login"))
+    return render_template("forgot.html")
+
+
+@app.route("/set-password/<token>", methods=["GET", "POST"])
+def set_password(token):
+    link = find_link(token)
+    if not link:
+        return render_template("error.html", code=410,
+                               message="This link has expired or was already used. Ask for a new one."), 410
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if len(password) < 8:
+            flash("The password needs at least 8 characters.")
+        elif password != request.form.get("confirm", ""):
+            flash("The two passwords don't match.")
+        else:
+            g.db.execute("UPDATE technicians SET password_hash = ? WHERE id = ?",
+                         (generate_password_hash(password), link["tech_id"]))
+            g.db.execute("UPDATE sign_in_links SET used_at = ? WHERE tech_id = ? AND used_at IS NULL",
+                         (db.now(), link["tech_id"]))
+            g.db.commit()
+            sign_in(g.db.execute("SELECT * FROM technicians WHERE id = ?", (link["tech_id"],)).fetchone())
+            flash("Password saved. You're signed in.")
+            return redirect(url_for("dashboard"))
+    return render_template("set_password.html", link=link)
 
 
 @app.route("/logout", methods=["POST"])
@@ -325,7 +513,7 @@ def logout():
 # Dashboard and pitch metrics
 # ---------------------------------------------------------------------------
 
-def metrics(provider_id, company_id=None, since=None):
+def metrics(provider_id, company_id=None, since=None, until=None):
     where = "c.provider_id = ?"
     args = [provider_id]
     if company_id:
@@ -334,6 +522,9 @@ def metrics(provider_id, company_id=None, since=None):
     if since:
         where += " AND t.created_at >= ?"
         args.append(since)
+    if until:
+        where += " AND t.created_at < ?"
+        args.append(until)
     row = g.db.execute(
         "SELECT COUNT(*) AS total,"
         " SUM(t.status = 'resolved') AS resolved,"
@@ -342,12 +533,21 @@ def metrics(provider_id, company_id=None, since=None):
         " SUM(t.status = 'open') AS open,"
         " SUM(t.status = 'ai_answered') AS waiting,"
         " AVG(CASE WHEN t.first_reply_at IS NOT NULL THEN"
-        "   (julianday(t.first_reply_at) - julianday(t.created_at)) * 1440 END) AS reply_minutes"
-        f" FROM tickets t JOIN companies c ON c.id = t.company_id WHERE {where}", args).fetchone()
+        "   (julianday(t.first_reply_at) - julianday(t.created_at)) * 1440 END) AS reply_minutes,"
+        " COUNT(t.target_met) AS targeted, SUM(t.target_met) AS on_time,"
+        " SUM(t.status = 'open' AND t.target_met IS NULL AND t.due_at < ?) AS late,"
+        " COUNT(t.rating) AS rated, SUM(t.rating = 3) AS happy,"
+        " (SELECT COALESCE(SUM(e.minutes), 0) FROM time_entries e"
+        "   WHERE e.ticket_id IN (SELECT t2.id FROM tickets t2 JOIN companies c ON c.id = t2.company_id"
+        f"   WHERE {where.replace('t.', 't2.')})) AS minutes"
+        f" FROM tickets t JOIN companies c ON c.id = t.company_id WHERE {where}",
+        [db.now()] + args + args).fetchone()
     m = {k: (row[k] or 0) for k in row.keys()}
     m["ai_rate"] = round(100 * m["by_ai"] / m["resolved"]) if m["resolved"] else None
     m["hours_saved"] = round(m["by_ai"] * config.MINUTES_SAVED_PER_AI_TICKET / 60, 1)
     m["reply_minutes"] = round(m["reply_minutes"], 1) if row["reply_minutes"] is not None else None
+    m["on_time_rate"] = round(100 * m["on_time"] / m["targeted"]) if m["targeted"] else None
+    m["happy_rate"] = round(100 * m["happy"] / m["rated"]) if m["rated"] else None
     return m
 
 
@@ -369,7 +569,8 @@ def dashboard():
         " ORDER BY d.warranty_end LIMIT 8", (pid, soon)).fetchall()
     queue = g.db.execute(
         "SELECT t.*, c.name AS company_name FROM tickets t JOIN companies c ON c.id = t.company_id"
-        " WHERE c.provider_id = ? AND t.status = 'open' ORDER BY t.created_at LIMIT 8",
+        " WHERE c.provider_id = ? AND t.status = 'open'"
+        " ORDER BY t.target_met IS NOT NULL, t.due_at IS NULL, t.due_at, t.created_at LIMIT 8",
         (pid,)).fetchall()
     return render_template("dashboard.html", all_time=metrics(pid),
                            month=metrics(pid, since=month_start()),
@@ -394,11 +595,14 @@ def tickets():
     if company_id:
         where.append("t.company_id = ?")
         args.append(company_id)
+    # Waiting tickets: the ones whose reply is due soonest come first.
+    order = ("t.target_met IS NOT NULL, t.due_at IS NULL, t.due_at, t.created_at" if status == "open"
+             else "t.created_at DESC")
     rows = g.db.execute(
         "SELECT t.*, c.name AS company_name, tech.name AS tech_name FROM tickets t"
         " JOIN companies c ON c.id = t.company_id"
         " LEFT JOIN technicians tech ON tech.id = t.assigned_to"
-        f" WHERE {' AND '.join(where)} ORDER BY t.created_at DESC LIMIT 200", args).fetchall()
+        f" WHERE {' AND '.join(where)} ORDER BY {order} LIMIT 200", args).fetchall()
     all_companies = g.db.execute(
         "SELECT id, name FROM companies WHERE provider_id = ? ORDER BY name",
         (g.provider["id"],)).fetchall()
@@ -425,8 +629,27 @@ def ticket(ticket_id):
     techs = g.db.execute(
         "SELECT id, name FROM technicians WHERE provider_id = ? AND active = 1 ORDER BY name",
         (g.provider["id"],)).fetchall()
+    time_log = g.db.execute("SELECT * FROM time_entries WHERE ticket_id = ? ORDER BY id",
+                            (ticket_id,)).fetchall()
+    replies = g.db.execute("SELECT * FROM saved_replies WHERE provider_id = ? ORDER BY title",
+                           (g.provider["id"],)).fetchall()
     return render_template("ticket.html", t=t, messages=msgs, person=person,
-                           devices=devices, history=history, techs=techs)
+                           devices=devices, history=history, techs=techs,
+                           attached=files.by_message(g.db, ticket_id), time_log=time_log,
+                           time_total=sum(e["minutes"] for e in time_log), saved_replies=replies)
+
+
+def log_time(ticket_id, minutes, note=""):
+    if minutes and 0 < minutes <= 24 * 60:
+        g.db.execute("INSERT INTO time_entries (ticket_id, tech_id, tech_name, minutes, note, created_at)"
+                     " VALUES (?, ?, ?, ?, ?, ?)",
+                     (ticket_id, g.tech["id"], g.tech["name"], minutes, note.strip()[:200], db.now()))
+
+
+def target_reached(ticket_id):
+    """A technician has answered: record whether it was within the response target."""
+    g.db.execute("UPDATE tickets SET target_met = (? <= due_at)"
+                 " WHERE id = ? AND due_at IS NOT NULL AND target_met IS NULL", (db.now(), ticket_id))
 
 
 @app.route("/tickets/<int:ticket_id>/reply", methods=["POST"])
@@ -434,16 +657,22 @@ def ticket(ticket_id):
 def ticket_reply(ticket_id):
     t = own_ticket(ticket_id)
     body = request.form.get("body", "").strip()
-    if body:
-        g.db.execute(
+    uploads = [u for u in request.files.getlist("files") if u and u.filename]
+    if body or uploads:
+        cur = g.db.execute(
             "INSERT INTO messages (ticket_id, sender, author_name, body, created_at)"
-            " VALUES (?, 'tech', ?, ?, ?)", (ticket_id, g.tech["name"], body, db.now()))
+            " VALUES (?, 'tech', ?, ?, ?)", (ticket_id, g.tech["name"], body or "(attached files)", db.now()))
+        for problem in files.save_uploads(g.db, ticket_id, cur.lastrowid, uploads):
+            flash(f"Not attached: {problem}")
         g.db.execute(
             "UPDATE tickets SET first_reply_at = COALESCE(first_reply_at, ?),"
             " assigned_to = COALESCE(assigned_to, ?),"
             " status = CASE WHEN status = 'ai_answered' THEN 'open' ELSE status END WHERE id = ?",
             (db.now(), g.tech["id"], ticket_id))
+        target_reached(ticket_id)
+    log_time(ticket_id, request.form.get("minutes", type=int))
     if request.form.get("resolve"):
+        target_reached(ticket_id)
         g.db.execute(
             "UPDATE tickets SET status = 'resolved', resolved_by = 'human', resolved_at = ?"
             " WHERE id = ?", (db.now(), ticket_id))
@@ -465,15 +694,27 @@ def ticket_reply(ticket_id):
 @app.route("/tickets/<int:ticket_id>/update", methods=["POST"])
 @login_required
 def ticket_update(ticket_id):
-    own_ticket(ticket_id)
+    t = own_ticket(ticket_id)
     action = request.form.get("action")
     if action == "assign":
         tech_id = request.form.get("tech_id", type=int)
         valid = tech_id and g.db.execute(
-            "SELECT 1 FROM technicians WHERE id = ? AND provider_id = ?",
+            "SELECT 1 FROM technicians WHERE id = ? AND provider_id = ? AND active = 1",
             (tech_id, g.provider["id"])).fetchone()
         g.db.execute("UPDATE tickets SET assigned_to = ? WHERE id = ?",
                      (tech_id if valid else None, ticket_id))
+        if valid and tech_id != g.tech["id"] and t["status"] != "resolved":
+            notify_techs(ticket_id, "assigned", only=tech_id)
+    elif action == "priority":
+        priority = request.form.get("priority")
+        if priority in config.PRIORITIES:
+            g.db.execute("UPDATE tickets SET priority = ? WHERE id = ?", (priority, ticket_id))
+            set_due(ticket_id)
+    elif action == "log_time":
+        log_time(ticket_id, request.form.get("minutes", type=int), request.form.get("note", ""))
+    elif action == "remove_time":
+        g.db.execute("DELETE FROM time_entries WHERE id = ? AND ticket_id = ?",
+                     (request.form.get("entry_id", type=int), ticket_id))
     elif action == "reopen":
         g.db.execute("UPDATE tickets SET status = 'open', resolved_by = NULL, resolved_at = NULL"
                      " WHERE id = ?", (ticket_id,))
@@ -483,6 +724,28 @@ def ticket_update(ticket_id):
                      (g.tech["id"], ticket_id))
     g.db.commit()
     return redirect(url_for("ticket", ticket_id=ticket_id))
+
+
+@app.route("/files/<int:file_id>")
+@login_required
+def ticket_file(file_id):
+    row = g.db.execute(
+        "SELECT a.* FROM attachments a JOIN tickets t ON t.id = a.ticket_id"
+        " JOIN companies c ON c.id = t.company_id WHERE a.id = ? AND c.provider_id = ?",
+        (file_id, g.provider["id"])).fetchone()
+    return send_attachment(row)
+
+
+def send_attachment(row):
+    if not row or not files.path(row).exists():
+        abort(404)
+    response = send_file(files.path(row), mimetype=row["content_type"], download_name=row["filename"],
+                         as_attachment=not row["content_type"].startswith("image/"))
+    # A file can never run scripts or be treated as a web page.
+    response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src 'self'"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -594,8 +857,123 @@ def company_settings(company_id):
         domain = request.form.get("email_domain", "").strip().lower().lstrip("@")
         g.db.execute("UPDATE companies SET email_domain = ? WHERE id = ?", (domain, company_id))
         flash("Email domain saved.")
+    elif action == "report":
+        email = request.form.get("report_email", "").strip().lower()
+        hours_included = request.form.get("monthly_hours", type=float) or 0
+        g.db.execute("UPDATE companies SET report_email = ?, report_auto = ?, monthly_hours = ? WHERE id = ?",
+                     (email if "@" in email else "", 1 if request.form.get("report_auto") else 0,
+                      max(hours_included, 0), company_id))
+        flash("Report settings saved.")
     g.db.commit()
     return redirect(url_for("company", company_id=company_id))
+
+
+def month_bounds(key):
+    """'2026-10' -> ('2026-10-01 00:00:00', '2026-11-01 00:00:00', 'October 2026')."""
+    year, month = (int(x) for x in key.split("-"))
+    nxt = (year + month // 12, month % 12 + 1)
+    return (f"{year:04d}-{month:02d}-01 00:00:00", f"{nxt[0]:04d}-{nxt[1]:02d}-01 00:00:00",
+            f"{calendar.month_name[month]} {year}")
+
+
+def previous_month(moment=None):
+    first = (moment or utcnow()).replace(day=1)
+    return (first - timedelta(days=1)).strftime("%Y-%m")
+
+
+def build_report(c, key):
+    """Everything in one company's monthly report."""
+    start, end, label = month_bounds(key)
+    m = metrics(c["provider_id"], c["id"], since=start, until=end)
+    tickets = g.db.execute(
+        "SELECT t.*, (SELECT COALESCE(SUM(e.minutes), 0) FROM time_entries e WHERE e.ticket_id = t.id"
+        "   AND e.created_at >= ? AND e.created_at < ?) AS minutes"
+        " FROM tickets t WHERE t.company_id = ? AND ((t.created_at >= ? AND t.created_at < ?)"
+        "   OR t.id IN (SELECT e.ticket_id FROM time_entries e WHERE e.created_at >= ? AND e.created_at < ?))"
+        " ORDER BY t.created_at", (start, end, c["id"], start, end, start, end)).fetchall()
+    minutes = sum(t["minutes"] for t in tickets)
+    categories = g.db.execute(
+        "SELECT category, COUNT(*) AS n FROM tickets WHERE company_id = ? AND created_at >= ?"
+        " AND created_at < ? GROUP BY category ORDER BY n DESC", (c["id"], start, end)).fetchall()
+    soon = (parse_time(end) + timedelta(days=60)).strftime("%Y-%m-%d")
+    warranties = g.db.execute(
+        "SELECT d.*, p.name AS person_name FROM devices d LEFT JOIN people p ON p.id = d.person_id"
+        " WHERE d.company_id = ? AND d.warranty_end != '' AND d.warranty_end <= ? ORDER BY d.warranty_end",
+        (c["id"], soon)).fetchall()
+    checklists = g.db.execute(
+        "SELECT r.*, (SELECT COUNT(*) FROM checklist_items i WHERE i.run_id = r.id) AS total,"
+        " (SELECT COUNT(*) FROM checklist_items i WHERE i.run_id = r.id AND i.done = 1) AS done"
+        " FROM checklist_runs r WHERE r.company_id = ? AND r.created_at >= ? AND r.created_at < ?",
+        (c["id"], start, end)).fetchall()
+    provider = g.db.execute("SELECT * FROM providers WHERE id = ?", (c["provider_id"],)).fetchone()
+    return dict(c=c, key=key, label=label, m=m, tickets=tickets, minutes=minutes,
+                included=c["monthly_hours"] * 60, categories=categories, warranties=warranties,
+                checklists=checklists, provider=provider,
+                today=utcnow().strftime("%Y-%m-%d"))
+
+
+def report_text(r):
+    """The plain-text email version of a monthly report."""
+    m = r["m"]
+    lines = [f"IT support report for {r['c']['name']}: {r['label']}", f"From {r['provider']['name']}", "",
+             f"Requests: {m['total']}  (resolved: {m['resolved']}, still open: {m['open'] + m['waiting']})"]
+    if m["by_ai"]:
+        lines.append(f"Answered instantly, no technician needed: {m['by_ai']}")
+    if m["on_time_rate"] is not None:
+        lines.append(f"Technician replies within the response target: {m['on_time_rate']}%")
+    if m["happy_rate"] is not None:
+        lines.append(f"Staff who rated the help as good: {m['happy_rate']}% of {m['rated']} ratings")
+    used = f"Technician time: {hours(r['minutes'])}"
+    if r["included"]:
+        extra = r["minutes"] - r["included"]
+        used += (f" of {hours(r['included'])} included ({hours(extra)} extra)" if extra > 0
+                 else f" of {hours(r['included'])} included")
+    lines += [used, ""]
+    if r["categories"]:
+        lines.append("Most common problems:")
+        lines += [f"  - {cat['category']}: {cat['n']}" for cat in r["categories"]]
+        lines.append("")
+    if r["tickets"]:
+        lines.append("Requests:")
+        for t in r["tickets"]:
+            spent = f", {hours(t['minutes'])}" if t["minutes"] else ""
+            lines.append(f"  {t['created_at'][:10]}  {t['subject']} ({t['requester_name']},"
+                         f" {STATUS_LABELS[t['status']].lower()}{spent})")
+        lines.append("")
+    if r["checklists"]:
+        lines.append("Starters and leavers:")
+        lines += [f"  - {x['template_name']}: {x['subject_name']} ({x['done']} of {x['total']} steps done)"
+                  for x in r["checklists"]]
+        lines.append("")
+    if r["warranties"]:
+        lines.append("Warranties ended or ending in the next 60 days:")
+        lines += [f"  - {d['name']} ({d['person_name'] or 'unassigned'}): {d['warranty_end']}"
+                  for d in r["warranties"]]
+        lines.append("")
+    lines.append("Questions about this report? Just reply to this email.")
+    return "\n".join(lines)
+
+
+@app.route("/companies/<int:company_id>/report", methods=["GET", "POST"])
+@login_required
+def company_report(company_id):
+    c = own_company(company_id)
+    key = request.values.get("month") or previous_month()
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", key):
+        abort(400)
+    r = build_report(c, key)
+    if request.method == "POST":
+        to = request.form.get("to", "").strip() or c["report_email"]
+        if "@" not in to:
+            flash("Add the client's email address first (Report settings on the company page).")
+        else:
+            error = channels.send_email(to, f"IT support report: {r['label']} - {c['name']}", report_text(r))
+            flash(f"Not sent: {error}" if error else f"Report emailed to {to}.")
+        return redirect(url_for("company_report", company_id=company_id, month=key))
+    now = utcnow()
+    months = [f"{(now.year * 12 + now.month - 1 - i) // 12:04d}-{(now.month - 1 - i) % 12 + 1:02d}"
+              for i in range(13)]          # this month and the twelve before it
+    return render_template("report.html", months=months, **r)
 
 
 @app.route("/companies/<int:company_id>/delete", methods=["POST"])
@@ -605,6 +983,7 @@ def company_delete(company_id):
     if request.form.get("confirm", "").strip() != c["name"]:
         flash("Type the company name exactly to confirm deletion. Nothing was deleted.")
         return redirect(url_for("company", company_id=company_id))
+    files.remove_for_company(g.db, company_id)
     g.db.execute("DELETE FROM companies WHERE id = ?", (company_id,))
     g.db.commit()
     flash(f"{c['name']} and all of its tickets, people, devices and guides were deleted.")
@@ -621,50 +1000,62 @@ def _csv(rows, columns):
     writer.writerow(columns)
     for r in rows:
         writer.writerow([r[col] for col in columns])
-    return "Ã¯Â»Â¿" + out.getvalue()      # BOM so Excel opens it correctly
+    return "﻿" + out.getvalue()      # BOM so Excel opens it correctly
 
 
 def _company_files(c):
     cid = c["id"]
     q = g.db.execute
-    files = {}
-    files["tickets.csv"] = _csv(
-        q("SELECT id, created_at, requester_name, requester_email, subject, category, status,"
-          " resolved_by, escalation_reason, first_reply_at, resolved_at FROM tickets"
-          " WHERE company_id = ? ORDER BY id", (cid,)).fetchall(),
-        ["id", "created_at", "requester_name", "requester_email", "subject", "category",
-         "status", "resolved_by", "escalation_reason", "first_reply_at", "resolved_at"])
-    files["ticket_messages.csv"] = _csv(
+    out = {}
+    columns = ["id", "created_at", "requester_name", "requester_email", "subject", "category",
+               "priority", "status", "resolved_by", "escalation_reason", "first_reply_at",
+               "resolved_at", "target_met", "rating", "rating_note"]
+    out["tickets.csv"] = _csv(
+        q(f"SELECT {', '.join(columns)} FROM tickets WHERE company_id = ? ORDER BY id", (cid,)).fetchall(),
+        columns)
+    out["time_spent.csv"] = _csv(
+        q("SELECT e.ticket_id, e.created_at, e.tech_name, e.minutes, e.note FROM time_entries e"
+          " JOIN tickets t ON t.id = e.ticket_id WHERE t.company_id = ? ORDER BY e.id", (cid,)).fetchall(),
+        ["ticket_id", "created_at", "tech_name", "minutes", "note"])
+    for a in q("SELECT a.* FROM attachments a JOIN tickets t ON t.id = a.ticket_id"
+               " WHERE t.company_id = ? ORDER BY a.id", (cid,)).fetchall():
+        try:
+            out[f"attachments/ticket {a['ticket_id']}/{a['id']} {a['filename']}"] = files.path(a).read_bytes()
+        except OSError:
+            pass
+    out["ticket_messages.csv"] = _csv(
         q("SELECT m.ticket_id, m.created_at, m.sender, m.author_name, m.body FROM messages m"
           " JOIN tickets t ON t.id = m.ticket_id WHERE t.company_id = ? ORDER BY m.id",
           (cid,)).fetchall(),
         ["ticket_id", "created_at", "sender", "author_name", "body"])
-    files["people.csv"] = _csv(
+    out["people.csv"] = _csv(
         q("SELECT id, name, email, job_title FROM people WHERE company_id = ? ORDER BY name",
           (cid,)).fetchall(), ["id", "name", "email", "job_title"])
-    files["devices.csv"] = _csv(
+    out["devices.csv"] = _csv(
         q("SELECT d.id, d.name, d.kind, d.serial, d.warranty_end, p.name AS assigned_to"
           " FROM devices d LEFT JOIN people p ON p.id = d.person_id WHERE d.company_id = ?"
           " ORDER BY d.name", (cid,)).fetchall(),
         ["id", "name", "kind", "serial", "warranty_end", "assigned_to"])
     for a in q("SELECT * FROM articles WHERE company_id = ? ORDER BY id", (cid,)):
         safe = "".join(ch if ch.isalnum() or ch in " -_" else "" for ch in a["title"])[:60].strip()
-        files[f"guides/{a['id']} {safe}.txt"] = f"{a['title']}\n\n{a['body']}\n"
+        out[f"guides/{a['id']} {safe}.txt"] = f"{a['title']}\n\n{a['body']}\n"
     lines = []
     for r in q("SELECT * FROM checklist_runs WHERE company_id = ? ORDER BY id", (cid,)).fetchall():
         lines.append(f"{r['template_name']}: {r['subject_name']} ({r['created_at']})")
         for i in q("SELECT * FROM checklist_items WHERE run_id = ? ORDER BY id", (r["id"],)):
             lines.append(f"  [{'x' if i['done'] else ' '}] {i['text']}")
         lines.append("")
-    files["checklists.txt"] = "\n".join(lines)
-    files["README.txt"] = (
+    out["checklists.txt"] = "\n".join(lines)
+    out["README.txt"] = (
         f"Data export for {c['name']}\nCreated {db.now()} UTC by {config.APP_NAME}\n\n"
         "tickets.csv          every request\n"
         "ticket_messages.csv  the full conversation on each request\n"
+        "time_spent.csv       technician time logged on each request\n"
+        "attachments/         pictures and files sent with requests\n"
         "people.csv           staff\ndevices.csv          equipment and who has it\n"
         "guides/              how-to guides written for this company\n"
         "checklists.txt       starter and leaver checklists\n")
-    return files
+    return out
 
 
 def _zip_response(file_map, filename):
@@ -692,17 +1083,17 @@ def company_export(company_id):
 @app.route("/export")
 @owner_required
 def export_all():
-    files = {}
+    out = {}
     for c in g.db.execute("SELECT * FROM companies WHERE provider_id = ? ORDER BY name",
                           (g.provider["id"],)).fetchall():
         for name, content in _company_files(c).items():
-            files[f"{_slug(c['name'])}/{name}"] = content
+            out[f"{_slug(c['name'])}/{name}"] = content
     shared = g.db.execute(
         "SELECT title, keywords, body, source FROM articles"
         " WHERE provider_id = ? AND company_id IS NULL ORDER BY title", (g.provider["id"],)).fetchall()
-    files["shared_guides.json"] = json.dumps([dict(r) for r in shared], indent=2)
+    out["shared_guides.json"] = json.dumps([dict(r) for r in shared], indent=2)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return _zip_response(files, f"{_slug(g.provider['name'])}-full-export-{stamp}.zip")
+    return _zip_response(out, f"{_slug(g.provider['name'])}-full-export-{stamp}.zip")
 
 
 # ---------------------------------------------------------------------------
@@ -750,6 +1141,69 @@ def guide_edit(article_id=None):
     all_companies = g.db.execute("SELECT id, name FROM companies WHERE provider_id = ? ORDER BY name",
                                  (g.provider["id"],)).fetchall()
     return render_template("guide_edit.html", a=article, companies=all_companies)
+
+
+@app.route("/replies", methods=["GET", "POST"])
+@login_required
+def saved_replies():
+    """Ready-made answers technicians drop into a reply with one click."""
+    pid = g.provider["id"]
+    if request.method == "POST":
+        reply_id = request.form.get("reply_id", type=int)
+        title = request.form.get("title", "").strip()[:100]
+        body = request.form.get("body", "").strip()
+        if request.form.get("delete") and reply_id:
+            g.db.execute("DELETE FROM saved_replies WHERE id = ? AND provider_id = ?", (reply_id, pid))
+        elif not (title and body):
+            flash("A saved reply needs a name and some text.")
+        elif reply_id:
+            g.db.execute("UPDATE saved_replies SET title = ?, body = ? WHERE id = ? AND provider_id = ?",
+                         (title, body, reply_id, pid))
+        else:
+            g.db.execute("INSERT INTO saved_replies (provider_id, title, body) VALUES (?, ?, ?)",
+                         (pid, title, body))
+        g.db.commit()
+        return redirect(url_for("saved_replies"))
+    rows = g.db.execute("SELECT * FROM saved_replies WHERE provider_id = ? ORDER BY title", (pid,)).fetchall()
+    return render_template("replies.html", replies=rows)
+
+
+@app.route("/search")
+@login_required
+def search():
+    q = request.args.get("q", "").strip()[:100]
+    found = dict(tickets=[], people=[], devices=[], guides=[], companies=[])
+    if re.fullmatch(r"#?\d+", q):
+        t = g.db.execute("SELECT t.id FROM tickets t JOIN companies c ON c.id = t.company_id"
+                         " WHERE t.id = ? AND c.provider_id = ?", (int(q.lstrip("#")), g.provider["id"])).fetchone()
+        if t:
+            return redirect(url_for("ticket", ticket_id=t["id"]))
+    if len(q) >= 2:
+        like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        pid = g.provider["id"]
+        run = lambda sql, n: g.db.execute(sql, (pid,) + (like,) * n).fetchall()   # noqa: E731
+        found["tickets"] = run(
+            "SELECT t.*, c.name AS company_name FROM tickets t JOIN companies c ON c.id = t.company_id"
+            " WHERE c.provider_id = ? AND (t.subject LIKE ? ESCAPE '\\' OR t.requester_name LIKE ? ESCAPE '\\'"
+            " OR t.requester_email LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM messages m"
+            "   WHERE m.ticket_id = t.id AND m.body LIKE ? ESCAPE '\\'))"
+            " ORDER BY t.created_at DESC LIMIT 25", 4)
+        found["people"] = run(
+            "SELECT p.*, c.name AS company_name FROM people p JOIN companies c ON c.id = p.company_id"
+            " WHERE c.provider_id = ? AND (p.name LIKE ? ESCAPE '\\' OR p.email LIKE ? ESCAPE '\\'"
+            " OR p.phone LIKE ? ESCAPE '\\' OR p.job_title LIKE ? ESCAPE '\\') ORDER BY p.name LIMIT 25", 4)
+        found["devices"] = run(
+            "SELECT d.*, c.name AS company_name, p.name AS person_name FROM devices d"
+            " JOIN companies c ON c.id = d.company_id LEFT JOIN people p ON p.id = d.person_id"
+            " WHERE c.provider_id = ? AND (d.name LIKE ? ESCAPE '\\' OR d.serial LIKE ? ESCAPE '\\'"
+            " OR d.notes LIKE ? ESCAPE '\\') ORDER BY d.name LIMIT 25", 3)
+        found["guides"] = run(
+            "SELECT a.* FROM articles a WHERE a.provider_id = ? AND (a.title LIKE ? ESCAPE '\\'"
+            " OR a.keywords LIKE ? ESCAPE '\\' OR a.body LIKE ? ESCAPE '\\') ORDER BY a.title LIMIT 25", 3)
+        found["companies"] = run(
+            "SELECT * FROM companies WHERE provider_id = ? AND name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 25", 1)
+    return render_template("search.html", q=q, found=found,
+                           total=sum(len(v) for v in found.values()))
 
 
 # ---------------------------------------------------------------------------
@@ -848,6 +1302,9 @@ def channels_page():
         email_out=email_out["from_address"] if email_out else None,
         email_in=email_in["username"] if email_in else None,
         whatsapp=bool(channels.whatsapp()),
+        paystack=bool(payments.settings()),
+        paystack_test=(payments.settings() or {}).get("secret_key", "").startswith("sk_test_"),
+        paystack_webhook=channels.public_url() + url_for("paystack_webhook"),
         webhook_url=channels.public_url() + url_for("whatsapp_webhook"),
         public_url=channels.public_url(),
         settings_exists=channels.SETTINGS_PATH.exists())
@@ -861,48 +1318,178 @@ def channels_page():
 @login_required
 def team():
     bill = billing(g.provider)
+    pid = g.provider["id"]
     if request.method == "POST":
-        if g.tech["role"] != "owner":
-            abort(403)
         action = request.form.get("action")
-        if action == "add":
-            name = request.form.get("name", "").strip()
-            email = request.form.get("email", "").strip().lower()
-            password = request.form.get("password", "")
-            limit = bill["plan"]["max_techs"]
-            if limit is not None and bill["seats"] >= limit:
-                flash(f"The {bill['plan']['name']} plan includes {limit} technician. "
-                      "Move to the Team plan to add more.")
-            elif not (name and email) or len(password) < 8:
-                flash("Enter a name, an email, and a starting password of at least 8 characters.")
-            elif g.db.execute("SELECT 1 FROM technicians WHERE email = ?", (email,)).fetchone():
-                flash("That email already has an account.")
+        # Anyone can change their own settings; the rest is for the owner.
+        if action == "my_settings":
+            notify = request.form.get("notify")
+            if notify in ("all", "mine", "none"):
+                g.db.execute("UPDATE technicians SET notify = ? WHERE id = ?", (notify, g.tech["id"]))
+                flash("Saved.")
+        elif action == "my_password":
+            new = request.form.get("new_password", "")
+            if not check_password_hash(g.tech["password_hash"], request.form.get("current_password", "")):
+                flash("Your current password is not right.")
+            elif len(new) < 8:
+                flash("The new password needs at least 8 characters.")
             else:
-                g.db.execute(
-                    "INSERT INTO technicians (provider_id, name, email, password_hash, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (g.provider["id"], name, email, generate_password_hash(password), db.now()))
+                g.db.execute("UPDATE technicians SET password_hash = ? WHERE id = ?",
+                             (generate_password_hash(new), g.tech["id"]))
+                g.db.commit()
+                sign_in(g.db.execute("SELECT * FROM technicians WHERE id = ?", (g.tech["id"],)).fetchone())
+                flash("Password changed. Other devices have been signed out.")
+        elif g.tech["role"] != "owner":
+            abort(403)
+        elif action == "add":
+            return invite_technician(bill)
+        elif action in ("resend", "reset_link"):
+            tech = g.db.execute("SELECT * FROM technicians WHERE id = ? AND provider_id = ? AND active = 1",
+                                (request.form.get("tech_id", type=int), pid)).fetchone()
+            if not tech:
+                abort(404)
+            kind = "invite" if not tech["password_hash"] else "reset"
+            share_link(tech, kind)
         elif action == "remove":
             g.db.execute(
                 "UPDATE technicians SET active = 0 WHERE id = ? AND provider_id = ? AND role != 'owner'",
-                (request.form.get("tech_id", type=int), g.provider["id"]))
-        elif action == "plan":
+                (request.form.get("tech_id", type=int), pid))
+        elif action in ("pay", "plan", "forget_card"):
             if g.android:
-                abort(403)          # plans change on the website only
-            plan = request.form.get("plan")
-            limit = config.PLANS.get(plan, {}).get("max_techs")
-            if plan not in config.PLANS:
-                abort(400)
-            if limit is not None and bill["seats"] > limit:
-                flash(f"Remove technicians first: that plan allows {limit}.")
-            else:
-                g.db.execute("UPDATE providers SET plan = ? WHERE id = ?", (plan, g.provider["id"]))
+                abort(403)          # plans and payment are handled on the website only
+            if action == "pay":
+                return start_payment(bill)
+            if action == "forget_card":
+                g.db.execute("UPDATE providers SET card_code = '', card_label = '' WHERE id = ?", (pid,))
+                flash("Saved card removed. You'll get a reminder to pay before your plan ends.")
+            elif request.form.get("plan") == "free":
+                if bill["seats"] > 1:
+                    flash("Remove technicians first: the Starter plan allows 1.")
+                else:
+                    g.db.execute("UPDATE providers SET plan = 'free', card_code = '', card_label = ''"
+                                 " WHERE id = ?", (pid,))
+                    flash("You're on the Starter plan now.")
+            elif request.form.get("plan") == "pro" and not payments.settings():
+                # Only while Paystack isn't set up (testing): switch without paying.
+                g.db.execute("UPDATE providers SET plan = 'pro', paid_until = ? WHERE id = ?",
+                             (fmt_time(utcnow() + timedelta(days=config.DAYS_PER_MONTH_PAID)), pid))
         g.db.commit()
         return redirect(url_for("team"))
     techs = g.db.execute(
         "SELECT * FROM technicians WHERE provider_id = ? AND active = 1 ORDER BY role != 'owner', name",
-        (g.provider["id"],)).fetchall()
-    return render_template("team.html", techs=techs, bill=bill, plans=config.PLANS)
+        (pid,)).fetchall()
+    history = g.db.execute("SELECT * FROM payments WHERE provider_id = ? AND status = 'paid'"
+                           " ORDER BY id DESC LIMIT 12", (pid,)).fetchall()
+    return render_template("team.html", techs=techs, bill=bill, plans=config.PLANS, history=history,
+                           payments_ready=bool(payments.settings()),
+                           grace_days=config.PAYMENT_GRACE_DAYS)
+
+
+def share_link(tech, kind):
+    """Email an invite or reset link, and show it to the owner in case email fails."""
+    url = make_link(tech["id"], kind)
+    g.db.commit()
+    error = channels.send_email(tech["email"], *link_email(tech, kind, url)) if channels.email_out() else "x"
+    what = "invite" if kind == "invite" else "password reset link"
+    if error:
+        flash(Markup("Email isn't working, so send {} this {} yourself (it works once):"
+                     "<div class='copy'>{}</div>").format(tech["name"], what, url))
+    else:
+        flash(f"{tech['name']} has been emailed a {what}.")
+
+
+def invite_technician(bill):
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    limit = bill["plan"]["max_techs"]
+    existing = g.db.execute("SELECT * FROM technicians WHERE email = ?", (email,)).fetchone()
+    if limit is not None and bill["seats"] >= limit:
+        flash(f"The {bill['plan']['name']} plan includes {limit} technician. "
+              "Move to the Team plan to add more.")
+    elif not (name and "@" in email):
+        flash("Enter their name and email.")
+    elif existing and (existing["active"] or existing["provider_id"] != g.provider["id"]):
+        flash("That email already has an account.")
+    else:
+        if existing:                 # someone removed earlier, coming back
+            g.db.execute("UPDATE technicians SET name = ?, active = 1, password_hash = '', role = 'tech'"
+                         " WHERE id = ?", (name, existing["id"]))
+            tech_id = existing["id"]
+        else:
+            tech_id = g.db.execute(
+                "INSERT INTO technicians (provider_id, name, email, password_hash, created_at)"
+                " VALUES (?, ?, ?, '', ?)", (g.provider["id"], name, email, db.now())).lastrowid
+        share_link(g.db.execute("SELECT * FROM technicians WHERE id = ?", (tech_id,)).fetchone(), "invite")
+    g.db.commit()
+    return redirect(url_for("team"))
+
+
+def start_payment(bill):
+    """Send the owner to Paystack to pay for the Team plan (M-Pesa or card)."""
+    months = request.form.get("months", type=int)
+    if months not in (1, 3, 12):
+        abort(400)
+    seats = max(bill["seats"], 1)
+    amount = config.PLANS["pro"]["price_per_tech"] * seats * months
+    reference = f"SD-{g.provider['id']}-{secrets.token_hex(6)}"
+    g.db.execute("INSERT INTO payments (provider_id, reference, amount, seats, months, status, created_at)"
+                 " VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+                 (g.provider["id"], reference, amount, seats, months, db.now()))
+    g.db.commit()
+    try:
+        checkout = payments.start(
+            g.provider["billing_email"] or g.tech["email"], amount, reference,
+            url_for("payment_return", _external=True),
+            f"{config.APP_NAME} Team plan, {seats} technician(s), {months} month(s)")
+    except payments.PaymentError as exc:
+        g.db.execute("UPDATE payments SET status = 'failed' WHERE reference = ?", (reference,))
+        g.db.commit()
+        flash(str(exc))
+        return redirect(url_for("team"))
+    return redirect(checkout)
+
+
+@app.route("/billing/return")
+@owner_required
+def payment_return():
+    """Paystack sends the owner back here after paying."""
+    reference = request.args.get("reference", "")
+    pay = g.db.execute("SELECT * FROM payments WHERE reference = ? AND provider_id = ?",
+                       (reference, g.provider["id"])).fetchone()
+    if not pay:
+        abort(404)
+    if pay["status"] == "paid":
+        flash("Payment received. Thank you!")
+        return redirect(url_for("team"))
+    try:
+        tx = payments.check(reference)
+    except payments.PaymentError as exc:
+        flash(f"{exc} If you paid, it will show here within a few minutes.")
+        return redirect(url_for("team"))
+    if apply_payment(reference, tx):
+        flash("Payment received. Thank you! Your Team plan is active.")
+    elif tx.get("status") in ("ongoing", "pending", "processing"):
+        flash("Your payment is still being confirmed (M-Pesa can take a minute). "
+              "Refresh this page shortly.")
+    else:
+        flash("The payment didn't go through, and you were not charged. You can try again.")
+    return redirect(url_for("team"))
+
+
+@app.route("/webhooks/paystack", methods=["POST"])
+def paystack_webhook():
+    """Paystack tells us about payments here, even if the owner closed the page."""
+    if not payments.signature_ok(request.get_data(), request.headers.get("X-Paystack-Signature")):
+        abort(403)
+    event = request.get_json(silent=True) or {}
+    reference = (event.get("data") or {}).get("reference", "")
+    if event.get("event") == "charge.success" and reference:
+        try:
+            apply_payment(reference, payments.check(reference))    # trust Paystack's own record
+        except payments.PaymentError as exc:
+            app.logger.error("Could not confirm Paystack payment %s: %s", reference, exc)
+            abort(500)       # Paystack retries later
+    return "", 200
 
 
 @app.route("/tour/done", methods=["POST"])
@@ -976,7 +1563,74 @@ def run_ai(ticket_row, company_row):
 # What staff can do, whichever way they reach us (help page, email, WhatsApp)
 # ---------------------------------------------------------------------------
 
-def open_ticket(c, name, email, problem, channel="web", person=None, subject=""):
+def set_due(ticket_id):
+    """Work out when a technician's reply is due, from the ticket's priority."""
+    t = g.db.execute("SELECT priority, waiting_since FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    if t and t["waiting_since"]:
+        hours_allowed = config.PRIORITIES.get(t["priority"], config.PRIORITIES["normal"])["hours"]
+        g.db.execute("UPDATE tickets SET due_at = ? WHERE id = ?",
+                     (fmt_time(parse_time(t["waiting_since"]) + timedelta(hours=hours_allowed)), ticket_id))
+
+
+EVENTS = {"needs_tech": "Needs a technician", "reply": "New reply", "assigned": "Assigned to you",
+          "late": "Reply overdue"}
+
+
+def notify_techs(ticket_id, event, only=None):
+    """Email the technicians who should know about this ticket, in the background."""
+    if not channels.email_out():
+        return
+    t = g.db.execute("SELECT t.*, c.name AS company_name, c.provider_id FROM tickets t"
+                     " JOIN companies c ON c.id = t.company_id WHERE t.id = ?", (ticket_id,)).fetchone()
+    techs = g.db.execute("SELECT * FROM technicians WHERE provider_id = ? AND active = 1"
+                         " AND password_hash != '' AND notify != 'none'", (t["provider_id"],)).fetchall()
+    if only:
+        to = [x for x in techs if x["id"] == only]
+    elif t["assigned_to"] and event != "late":
+        to = [x for x in techs if x["id"] == t["assigned_to"]]
+    else:
+        to = [x for x in techs if x["notify"] == "all" or x["id"] == t["assigned_to"]]
+    me = g.get("tech")
+    to = [x for x in to if not (me and x["id"] == me["id"])]
+    if not to:
+        return
+    last = g.db.execute("SELECT body FROM messages WHERE ticket_id = ? AND sender = 'user'"
+                        " ORDER BY id DESC LIMIT 1", (ticket_id,)).fetchone()
+    priority = config.PRIORITIES.get(t["priority"], config.PRIORITIES["normal"])["label"]
+    subject = f"{EVENTS[event]}: {t['subject']} [{t['company_name']}] #{t['id']}"
+    lines = [f"{EVENTS[event]} - {t['company_name']}", "",
+             f"From: {t['requester_name']}", f"Priority: {priority}"]
+    if t["due_at"] and t["target_met"] is None and t["status"] == "open":
+        lines.append(f"Reply due by: {t['due_at']} UTC")
+    if t["escalation_reason"] and event == "needs_tech":
+        lines.append(f"Why: {t['escalation_reason']}")
+    if last:
+        excerpt = last["body"] if len(last["body"]) <= 600 else last["body"][:600] + "..."
+        lines += ["", excerpt]
+    lines += ["", f"Open the ticket: {channels.public_url()}/tickets/{t['id']}", "",
+              f"To change which emails you get: {channels.public_url()}/team"]
+    for tech in to:
+        send_in_background(tech["email"], subject, "\n".join(lines))
+
+
+def finish_staff_turn(ticket_id, before, wrote=True):
+    """After a staff member acts (help page, email or WhatsApp): if the ticket
+    has just come to a technician, start its response clock and alert the team;
+    if it was already with one and they wrote more, tell the technician."""
+    t = g.db.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    if t["status"] != "open":
+        return
+    if before != "open":
+        g.db.execute("UPDATE tickets SET waiting_since = ?, target_met = NULL, late_alerted = 0"
+                     " WHERE id = ?", (db.now(), ticket_id))
+        set_due(ticket_id)
+        g.db.commit()
+        notify_techs(ticket_id, "needs_tech")
+    elif wrote:
+        notify_techs(ticket_id, "reply")
+
+
+def open_ticket(c, name, email, problem, channel="web", person=None, subject="", priority="normal"):
     """Create a ticket and give the AI its turn. Returns the ticket row."""
     problem = ai.redact(problem.strip())
     if person is None and email:
@@ -995,10 +1649,11 @@ def open_ticket(c, name, email, problem, channel="web", person=None, subject="")
         subject = subject[:77].rsplit(" ", 1)[0] + "..."
     cur = g.db.execute(
         "INSERT INTO tickets (company_id, person_id, device_id, requester_name, requester_email,"
-        " subject, category, status, public_token, channel, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+        " subject, category, status, public_token, channel, priority, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)",
         (c["id"], person_id, device["id"] if device else None, name, email, subject,
-         ai.categorize(problem), secrets.token_urlsafe(16), channel, db.now()))
+         ai.categorize(problem), secrets.token_urlsafe(16), channel,
+         priority if priority in config.PRIORITIES else "normal", db.now()))
     g.db.execute("INSERT INTO messages (ticket_id, sender, author_name, body, delivery, created_at)"
                  " VALUES (?, 'user', ?, ?, 'n/a', ?)", (cur.lastrowid, name, problem, db.now()))
     t = g.db.execute("SELECT * FROM tickets WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -1006,18 +1661,28 @@ def open_ticket(c, name, email, problem, channel="web", person=None, subject="")
     return t
 
 
-def staff_reply(t, c, body):
-    """The staff member adds detail to their ticket."""
+def first_message_id(ticket_id):
+    return g.db.execute("SELECT MIN(id) FROM messages WHERE ticket_id = ?", (ticket_id,)).fetchone()[0]
+
+
+def staff_reply(t, c, body, attach=()):
+    """The staff member adds detail (and maybe files) to their ticket.
+
+    attach: (filename, bytes) pairs. Returns reasons any file was refused."""
     body = ai.redact(body.strip())
-    if not body:
-        return
+    if not body and not attach:
+        return []
     if t["status"] == "resolved":
         g.db.execute("UPDATE tickets SET status = 'open', resolved_by = NULL, resolved_at = NULL,"
                      " escalation_reason = 'Reopened by staff member' WHERE id = ?", (t["id"],))
-    g.db.execute("INSERT INTO messages (ticket_id, sender, author_name, body, delivery, created_at)"
-                 " VALUES (?, 'user', ?, ?, 'n/a', ?)", (t["id"], t["requester_name"], body, db.now()))
-    if t["status"] == "ai_answered":
+    cur = g.db.execute("INSERT INTO messages (ticket_id, sender, author_name, body, delivery, created_at)"
+                       " VALUES (?, 'user', ?, ?, 'n/a', ?)",
+                       (t["id"], t["requester_name"], body or "(sent a picture or file)", db.now()))
+    problems = [p for name, content in attach[:config.MAX_FILES_PER_MESSAGE]
+                if (p := files.save(g.db, t["id"], cur.lastrowid, name, content))]
+    if t["status"] == "ai_answered" and body:
         run_ai(t, c)
+    return problems
 
 
 def staff_marks(t, action):
@@ -1044,17 +1709,26 @@ FIXED_WORDS = {"1", "fixed", "solved", "yes", "it is fixed", "its fixed", "it's 
 HELP_WORDS = {"2", "help", "no", "technician", "human", "still need help", "not fixed"}
 
 
-def handle_inbound(c, person, text, channel, ticket=None, subject=""):
-    """Route one incoming email or WhatsApp message. Returns the ticket id."""
+def handle_inbound(c, person, text, channel, ticket=None, subject="", attach=()):
+    """Route one incoming email or WhatsApp message, with any attached files.
+
+    Alerts technicians if needed. Returns the ticket id."""
+    before = ticket["status"] if ticket else None
     word = text.strip().lower().strip(".! ")
-    if ticket and word in FIXED_WORDS:
+    wrote = False
+    if ticket and word in FIXED_WORDS and not attach:
         staff_marks(ticket, "solved")       # does nothing if it is already closed
-    elif ticket and ticket["status"] == "ai_answered" and word in HELP_WORDS:
+    elif ticket and ticket["status"] == "ai_answered" and word in HELP_WORDS and not attach:
         staff_marks(ticket, "human")
     elif ticket:
-        staff_reply(ticket, c, text)
+        staff_reply(ticket, c, text, attach)
+        wrote = True
     else:
         ticket = open_ticket(c, person["name"], person["email"], text, channel, person, subject)
+        for name, content in attach[:config.MAX_FILES_PER_MESSAGE]:
+            files.save(g.db, ticket["id"], first_message_id(ticket["id"]), name, content)
+    g.db.commit()
+    finish_staff_turn(ticket["id"], before, wrote)
     return ticket["id"]
 
 
@@ -1077,12 +1751,19 @@ def flush_outbox(ticket_id):
     person = g.db.execute("SELECT * FROM people WHERE id = ?", (t["person_id"],)).fetchone()
     link = f"{channels.public_url()}/help/t/{t['public_token']}"
     last_id = pending[-1]["id"]
+    with_files = {r[0] for r in g.db.execute(
+        "SELECT DISTINCT message_id FROM attachments WHERE ticket_id = ?", (ticket_id,))}
     for m in pending:
         waiting = m["id"] == last_id and t["status"] == "ai_answered"
+        closed = m["id"] == last_id and t["status"] == "resolved" and m["sender"] == "tech"
         if t["channel"] == "whatsapp":
             body = m["body"]
+            if m["id"] in with_files:
+                body += f"\n\nSee the attached files: {link}"
             if waiting:
                 body += "\n\nReply 1 if that fixed it, or 2 to get a technician."
+            if closed:
+                body += f"\n\nThis request is now closed. How did we do? Tap to rate: {link}"
             error = (channels.send_whatsapp(person["phone"], body) if person and person["phone"]
                      else "no WhatsApp number on record")
             result = "sent by WhatsApp"
@@ -1090,8 +1771,15 @@ def flush_outbox(ticket_id):
                                        or (m["sender"] == "tech" and channels.email_out())):
             # Help-page tickets get an email only when a technician replies.
             who = f"{m['author_name']}, technician, wrote:\n\n" if m["sender"] == "tech" else ""
-            footer = ("Did that fix it? Reply to this email with FIXED, or with HELP to get a technician."
-                      if waiting else "Reply to this email to add more detail.")
+            if m["id"] in with_files:
+                who = f"{who}(Files are attached on the conversation page below.)\n\n"
+            if waiting:
+                footer = "Did that fix it? Reply to this email with FIXED, or with HELP to get a technician."
+            elif closed:
+                footer = (f"This request is now closed. How did we do? Rate it in one tap: {link}\n"
+                          "If the problem comes back, just reply to this email.")
+            else:
+                footer = "Reply to this email to add more detail."
             body = f"{who}{m['body']}\n\n--\n{footer}\nSee the whole conversation: {link}"
             error = channels.send_email(t["requester_email"], f"Re: {t['subject']} {ticket_tag(t)}", body)
             result = "sent by email"
@@ -1160,16 +1848,150 @@ def process_email(mail):
                 (company_id, mail["name"], mail["address"], db.now())).lastrowid
             person = g.db.execute("SELECT * FROM people WHERE id = ?", (new_id,)).fetchone()
     c = g.db.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
-    ticket_id = handle_inbound(c, person, text, "email", ticket, mail["subject"])
+    ticket_id = handle_inbound(c, person, text, "email", ticket, mail["subject"],
+                               attach=mail.get("files") or ())
     g.db.commit()
     flush_outbox(ticket_id)
 
 
+# ---------------------------------------------------------------------------
+# Background jobs: renewals, overdue tickets, monthly reports
+# ---------------------------------------------------------------------------
+
+BILLING_STAGES = {"reminder": 1, "charged": 2, "due": 2, "downgraded": 3}
+
+
+def billing_round():
+    """Remind, renew or downgrade Team plans as their paid time runs out."""
+    team_page = f"{channels.public_url()}/team"
+    for p in g.db.execute("SELECT * FROM providers WHERE plan = 'pro' AND paid_until IS NOT NULL").fetchall():
+        owner = g.db.execute("SELECT * FROM technicians WHERE provider_id = ? AND role = 'owner'"
+                             " AND active = 1 ORDER BY id LIMIT 1", (p["id"],)).fetchone()
+        if not owner:
+            continue
+        to = p["billing_email"] or owner["email"]
+        until = parse_time(p["paid_until"])
+        done_stage, _, done_for = p["billing_notice"].partition(":")
+        done = BILLING_STAGES.get(done_stage, 0) if done_for == p["paid_until"] else 0
+        now = utcnow()
+
+        def mark(stage):
+            g.db.execute("UPDATE providers SET billing_notice = ? WHERE id = ?",
+                         (f"{stage}:{p['paid_until']}", p["id"]))
+            g.db.commit()
+
+        if now < until:
+            if done < 1 and until - now <= timedelta(days=config.RENEWAL_REMINDER_DAYS):
+                mark("reminder")
+                how = (f"We'll renew it automatically with your {p['card_label']}." if p["card_code"]
+                       else f"To keep it, pay with M-Pesa or card here: {team_page}")
+                send_in_background(to, f"Your {config.APP_NAME} Team plan renews on {until:%d %B}",
+                                   f"Hello {owner['name']},\n\nYour Team plan is paid until "
+                                   f"{until:%d %B %Y}. {how}\n\nThank you for using {config.APP_NAME}.")
+        elif now < until + timedelta(days=config.PAYMENT_GRACE_DAYS):
+            if done >= 2:
+                continue
+            if p["card_code"]:
+                mark("charged")           # before charging, so a crash can never charge twice
+                renew_with_card(p, owner, to, team_page)
+            else:
+                mark("due")
+                send_in_background(to, f"Your {config.APP_NAME} Team plan payment is due",
+                                   f"Hello {owner['name']},\n\nYour Team plan ended on {until:%d %B}. "
+                                   f"It keeps working for {config.PAYMENT_GRACE_DAYS} more days while you "
+                                   f"pay. Pay with M-Pesa or card here: {team_page}")
+        elif done < 3:
+            mark("downgraded")
+            g.db.execute("UPDATE providers SET plan = 'free' WHERE id = ?", (p["id"],))
+            g.db.commit()
+            send_in_background(to, f"Your {config.APP_NAME} account moved to the Starter plan",
+                               f"Hello {owner['name']},\n\nWe didn't receive payment for the Team plan, so "
+                               "your account is now on the free Starter plan. Nothing has been deleted. "
+                               f"Pay any time to switch back: {team_page}")
+
+
+def renew_with_card(p, owner, to, team_page):
+    seats = max(g.db.execute("SELECT COUNT(*) FROM technicians WHERE provider_id = ? AND active = 1",
+                             (p["id"],)).fetchone()[0], 1)
+    amount = config.PLANS["pro"]["price_per_tech"] * seats
+    reference = f"SD-{p['id']}-{secrets.token_hex(6)}"
+    g.db.execute("INSERT INTO payments (provider_id, reference, amount, seats, months, status, automatic,"
+                 " created_at) VALUES (?, ?, ?, ?, 1, 'pending', 1, ?)",
+                 (p["id"], reference, amount, seats, db.now()))
+    g.db.commit()
+    try:
+        tx = payments.charge_saved_card(p["card_code"], to, amount, reference)
+    except payments.PaymentError as exc:
+        tx = {"status": "failed", "gateway_response": str(exc)}
+    if apply_payment(reference, tx):
+        send_in_background(to, f"{config.APP_NAME} payment received: {money(amount)}",
+                           f"Hello {owner['name']},\n\nWe charged {money(amount)} to your {p['card_label']} "
+                           f"for 1 month of the Team plan ({seats} technician{'s' if seats != 1 else ''}). "
+                           f"Thank you!\n\nReceipts and billing: {team_page}")
+    elif tx.get("status") == "failed":
+        g.db.execute("UPDATE payments SET status = 'failed' WHERE reference = ?", (reference,))
+        g.db.commit()
+        send_in_background(to, f"{config.APP_NAME}: we couldn't charge your card",
+                           f"Hello {owner['name']},\n\nWe tried to renew your Team plan with your "
+                           f"{p['card_label']}, but the payment didn't go through. Please pay with "
+                           f"M-Pesa or another card within {config.PAYMENT_GRACE_DAYS} days to keep the "
+                           f"Team plan: {team_page}")
+    # Anything else (still processing) is confirmed later by the Paystack webhook.
+
+
+def late_round():
+    """Alert technicians once about each ticket whose reply is overdue."""
+    for t in g.db.execute("SELECT id FROM tickets WHERE status = 'open' AND target_met IS NULL"
+                          " AND due_at < ? AND late_alerted = 0", (db.now(),)).fetchall():
+        g.db.execute("UPDATE tickets SET late_alerted = 1 WHERE id = ?", (t["id"],))
+        g.db.commit()
+        notify_techs(t["id"], "late")
+
+
+def report_round():
+    """On the 1st of the month, email last month's report to clients who get it automatically."""
+    if utcnow().day != 1 or not channels.email_out():
+        return
+    key = previous_month()
+    for c in g.db.execute("SELECT * FROM companies WHERE report_auto = 1 AND report_email != ''"
+                          " AND last_report != ?", (key,)).fetchall():
+        r = build_report(c, key)
+        error = channels.send_email(c["report_email"], f"IT support report: {r['label']} - {c['name']}",
+                                    report_text(r))
+        if error:
+            app.logger.error("Could not email the monthly report for company %s: %s", c["id"], error)
+        else:
+            g.db.execute("UPDATE companies SET last_report = ? WHERE id = ?", (key, c["id"]))
+            g.db.commit()
+
+
+def run_chores():
+    with app.app_context():
+        g.db = db.connect()
+        try:
+            for chore in (billing_round, late_round, report_round):
+                try:
+                    chore()
+                except Exception:
+                    g.db.rollback()
+                    app.logger.exception("Background job %s failed", chore.__name__)
+        finally:
+            g.db.close()
+
+
+CHORE_EVERY_SECONDS = 15 * 60
+
+
 def email_poller():
-    """Background loop: check the helpdesk mailbox once a minute."""
+    """Background loop: check the helpdesk mailbox once a minute, and run the
+    background jobs every 15 minutes."""
     mailbox_failing = False
+    last_chores = 0.0
     while True:
         monitoring.mail_beat()
+        if time.time() - last_chores >= CHORE_EVERY_SECONDS:
+            last_chores = time.time()
+            run_chores()
         if channels.email_in():
             with app.app_context():
                 g.db = db.connect()
@@ -1216,14 +2038,20 @@ def whatsapp_webhook():
             if not seen_before("unknown:" + m["phone"]):
                 channels.send_whatsapp(m["phone"], UNKNOWN_SENDER)
             continue
-        if not m["text"]:
-            channels.send_whatsapp(m["phone"], "Please describe the problem in a text message.")
-            continue
         c = g.db.execute("SELECT * FROM companies WHERE id = ?", (person["company_id"],)).fetchone()
         ticket = g.db.execute(
             "SELECT * FROM tickets WHERE person_id = ? AND channel = 'whatsapp'"
             " AND status != 'resolved' ORDER BY id DESC LIMIT 1", (person["id"],)).fetchone()
-        ticket_id = handle_inbound(c, person, m["text"], "whatsapp", ticket)
+        attach = ()
+        if m.get("media"):
+            content = channels.fetch_whatsapp_media(m["media"]["id"])
+            attach = [(m["media"]["filename"], content)] if content else ()
+        # A new request needs words; a picture alone can only add to an open one.
+        if not m["text"] and not (ticket and attach):
+            channels.send_whatsapp(m["phone"], "Please describe the problem in a text message. "
+                                   "You can send pictures with it too.")
+            continue
+        ticket_id = handle_inbound(c, person, m["text"] or "", "whatsapp", ticket, attach=attach)
         g.db.commit()
         flush_outbox(ticket_id)
     return "", 200
@@ -1245,8 +2073,15 @@ def portal(token):
         if not (name and problem):
             flash("Please add your name and describe the problem.")
             return render_template("portal.html", c=c, public=True)
-        t = open_ticket(c, name, email, problem)
+        # Staff choose between three plain-language levels; technicians can set "high" too.
+        urgency = request.form.get("urgency")
+        t = open_ticket(c, name, email, problem,
+                        priority=urgency if urgency in ("urgent", "normal", "low") else "normal")
+        for problem_note in files.save_uploads(g.db, t["id"], first_message_id(t["id"]),
+                                               request.files.getlist("files")):
+            flash(f"Not attached: {problem_note}")
         g.db.commit()
+        finish_staff_turn(t["id"], None)
         flush_outbox(t["id"])
         return redirect(url_for("portal_ticket", public_token=t["public_token"]))
     return render_template("portal.html", c=c, public=True)
@@ -1260,15 +2095,35 @@ def portal_ticket(public_token):
     c = g.db.execute("SELECT * FROM companies WHERE id = ?", (t["company_id"],)).fetchone()
     if request.method == "POST":
         action = request.form.get("action")
+        wrote = False
         if action in ("solved", "human"):
             staff_marks(t, action)
         elif action == "reply":
-            staff_reply(t, c, request.form.get("body", ""))
+            uploads = [(u.filename, u.read(config.MAX_FILE_MB * 1024 * 1024 + 1))
+                       for u in request.files.getlist("files") if u and u.filename]
+            wrote = bool(request.form.get("body", "").strip() or uploads)
+            for problem in staff_reply(t, c, request.form.get("body", ""), uploads):
+                flash(f"Not attached: {problem}")
+        elif action == "rate" and t["status"] == "resolved":
+            rating = request.form.get("rating", type=int)
+            if rating in (1, 2, 3):
+                g.db.execute("UPDATE tickets SET rating = ?, rating_note = ? WHERE id = ?",
+                             (rating, ai.redact(request.form.get("note", "").strip()[:1000]), t["id"]))
+                flash("Thank you for letting us know.")
         g.db.commit()
+        finish_staff_turn(t["id"], t["status"], wrote)
         flush_outbox(t["id"])
         return redirect(url_for("portal_ticket", public_token=public_token))
     msgs = g.db.execute("SELECT * FROM messages WHERE ticket_id = ? ORDER BY id", (t["id"],)).fetchall()
-    return render_template("portal_ticket.html", t=t, c=c, messages=msgs, public=True)
+    return render_template("portal_ticket.html", t=t, c=c, messages=msgs, public=True,
+                           attached=files.by_message(g.db, t["id"]))
+
+
+@app.route("/help/t/<public_token>/files/<int:file_id>")
+def portal_file(public_token, file_id):
+    row = g.db.execute("SELECT a.* FROM attachments a JOIN tickets t ON t.id = a.ticket_id"
+                       " WHERE a.id = ? AND t.public_token = ?", (file_id, public_token)).fetchone()
+    return send_attachment(row)
 
 
 @app.errorhandler(400)

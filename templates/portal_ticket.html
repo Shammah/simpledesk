@@ -10,6 +10,13 @@
 <div class="msg {{ m.sender }}">
   <div class="by">{{ {'user': 'You', 'ai': 'IT help (automatic answer)', 'tech': m.author_name ~ ', technician', 'system': 'IT help'}[m.sender] }} &middot; {{ m.created_at|ago }}</div>
   <div class="body">{{ m.body }}</div>
+  {% set items = attached.get(m.id) %}
+  {% if items %}<div class="files">{% for f in items %}
+    {% set src = url_for('portal_file', public_token=t.public_token, file_id=f.id) %}
+    {% if f.content_type.startswith('image/') %}
+    <a href="{{ src }}" target="_blank" rel="noopener" class="thumb" data-no-loader><img src="{{ src }}" alt="{{ f.filename }}" loading="lazy"></a>
+    {% else %}<a href="{{ src }}" class="file" data-no-loader>{{ f.filename }}</a>{% endif %}
+  {% endfor %}</div>{% endif %}
 </div>
 {% endfor %}
 
@@ -26,12 +33,29 @@
 <div class="note">A technician has your request and will reply here. <a href="">Check for a reply</a></div>
 <form method="post" style="margin-bottom:16px">{{ csrf() }}<button class="btn ghost" name="action" value="solved">It is fixed now, close my request</button></form>
 {% else %}
+  {% if not t.rating %}
+  <form method="post" class="card rate">
+    {{ csrf() }}<input type="hidden" name="action" value="rate">
+    <h2>How did we do?</h2>
+    <div class="faces">
+      <button class="face" name="rating" value="3"><span aria-hidden="true">😀</span>Good</button>
+      <button class="face" name="rating" value="2"><span aria-hidden="true">😐</span>Okay</button>
+      <button class="face" name="rating" value="1"><span aria-hidden="true">🙁</span>Not good</button>
+    </div>
+    <div class="field" style="margin:12px 0 0"><label for="note">Anything to add? (optional)</label>
+      <input type="text" id="note" name="note" maxlength="1000"></div>
+  </form>
+  {% else %}
+  <div class="note">Thanks for your rating: {{ {3: '😀 good', 2: '😐 okay', 1: '🙁 not good'}[t.rating] }}.</div>
+  {% endif %}
 <div class="note">This request is closed. If the problem comes back, write below and it will reopen.</div>
 {% endif %}
 
-<form method="post" class="card">
+<form method="post" class="card" enctype="multipart/form-data">
   {{ csrf() }}<input type="hidden" name="action" value="reply">
-  <div class="field"><label for="body">Add more detail</label><textarea id="body" name="body" maxlength="6000" required></textarea></div>
+  <div class="field"><label for="body">Add more detail</label><textarea id="body" name="body" maxlength="6000"></textarea></div>
+  <div class="field"><label for="files">Add a screenshot or photo (optional)</label>
+    <input type="file" id="files" name="files" accept="{{ file_accept }}" multiple></div>
   <button class="btn ghost">Send</button>
 </form>
 <p class="small"><a href="{{ url_for('portal', token=c.portal_token) }}">Ask about something else</a></p>

@@ -25,9 +25,10 @@
   }
   @media (pointer: fine) {
     html, body { cursor: var(--cursor), auto; }
-    a, button, .btn, select, summary, label.check, input[type=checkbox], input[type=date],
-    .theme-toggle, .menu-btn, .link { cursor: var(--cursor-hot), pointer; }
-    input[type=text], input[type=email], input[type=password], textarea { cursor: text; }
+    a, button, .btn, select, summary, label.check, input[type=checkbox], input[type=radio], input[type=date],
+    input[type=file], .theme-toggle, .menu-btn, .link { cursor: var(--cursor-hot), pointer; }
+    input[type=text], input[type=email], input[type=password], input[type=number], input[type=search],
+    textarea { cursor: text; }
     html.is-loading, html.is-loading * { cursor: var(--cursor-busy), progress !important; }
   }
 </style>
@@ -67,10 +68,14 @@
     </div>
     <div class="nav-menu" id="nav-menu">
     {% set here = request.endpoint %}
+    <form method="get" action="{{ url_for('search') }}" class="nav-search" role="search">
+      <input type="search" name="q" placeholder="Search or #ticket" aria-label="Search tickets, people, devices and guides" value="{{ q if here == 'search' else '' }}">
+    </form>
     <a href="{{ url_for('dashboard') }}" class="{{ 'on' if here == 'dashboard' }}">Dashboard</a>
     <a href="{{ url_for('tickets') }}" class="{{ 'on' if here in ('tickets', 'ticket') }}">Tickets</a>
-    <a href="{{ url_for('companies') }}" class="{{ 'on' if here in ('companies', 'company', 'checklist') }}">Companies</a>
+    <a href="{{ url_for('companies') }}" class="{{ 'on' if here in ('companies', 'company', 'checklist', 'company_report') }}">Companies</a>
     <a href="{{ url_for('guides') }}" class="{{ 'on' if here in ('guides', 'guide_edit') }}">Guides</a>
+    <a href="{{ url_for('saved_replies') }}" class="{{ 'on' if here == 'saved_replies' }}">Saved replies</a>
     <a href="{{ url_for('checklist_templates') }}" class="{{ 'on' if here == 'checklist_templates' }}">Checklists</a>
     <a href="{{ url_for('channels_page') }}" class="{{ 'on' if here == 'channels_page' }}">Channels</a>
     <a href="{{ url_for('team') }}" class="{{ 'on' if here == 'team' }}">Team &amp; plan</a>

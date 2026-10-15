@@ -1,12 +1,24 @@
 {% extends "base.html" %}
 {% block title %}#{{ t.id }} {{ t.subject }} - {{ app_name }}{% endblock %}
+{% macro file_list(items) %}
+  {% if items %}<div class="files">{% for f in items %}
+    {% if f.content_type.startswith('image/') %}
+    <a href="{{ url_for('ticket_file', file_id=f.id) }}" target="_blank" rel="noopener" class="thumb" data-no-loader><img src="{{ url_for('ticket_file', file_id=f.id) }}" alt="{{ f.filename }}" loading="lazy"></a>
+    {% else %}
+    <a href="{{ url_for('ticket_file', file_id=f.id) }}" class="file" data-no-loader>{{ f.filename }}</a>
+    {% endif %}
+  {% endfor %}</div>{% endif %}
+{% endmacro %}
 {% block content %}
+{% set due = due_label(t) %}
 <div class="head">
   <div>
     <p class="small muted"><a href="{{ url_for('tickets') }}">Tickets</a> / #{{ t.id }}</p>
     <h1>{{ t.subject }}</h1>
     <p><span class="tag {{ t.status }}">{{ status_labels[t.status] }}</span>
       {% if t.resolved_by %}<span class="small muted">by {{ 'AI, no technician needed' if t.resolved_by == 'ai' else 'a technician' }}</span>{% endif %}
+      <span class="tag prio-{{ t.priority }}">{{ priorities[t.priority].label }}</span>
+      {% if due %}<span class="tag {{ 'bad' if due.startswith('Late') else '' }}">{{ due }}</span>{% endif %}
       <span class="tag">{{ t.category }}</span>
       <span class="tag">Came in by {{ {'web': 'help link', 'email': 'email', 'whatsapp': 'WhatsApp'}[t.channel] }}</span></p>
   </div>
@@ -21,16 +33,34 @@
     <div class="msg {{ m.sender }}">
       <div class="by">{{ {'user': m.author_name, 'ai': m.author_name, 'tech': m.author_name ~ ' (technician)', 'system': 'Automatic message'}[m.sender] }} &middot; {{ m.created_at|ago }}</div>
       <div class="body">{{ m.body }}</div>
+      {{ file_list(attached.get(m.id)) }}
       {% if m.delivery.startswith('failed') %}<div class="small" style="color:var(--bad);margin-top:6px">Not delivered: {{ m.delivery[8:] }}</div>
       {% elif m.delivery.startswith('sent') %}<div class="small muted" style="margin-top:6px">{{ m.delivery|capitalize }}</div>{% endif %}
     </div>
     {% endfor %}
 
+    {% if t.rating %}
+    <div class="note"><strong>{{ {3: '😀 Rated good', 2: '😐 Rated okay', 1: '🙁 Rated not good'}[t.rating] }}</strong>{% if t.rating_note %}: “{{ t.rating_note }}”{% endif %}</div>
+    {% endif %}
+
     {% if t.status != 'resolved' %}
-    <form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card">
+    <form method="post" action="{{ url_for('ticket_reply', ticket_id=t.id) }}" class="card" enctype="multipart/form-data">
       {{ csrf() }}
-      <div class="field"><label for="body">Your reply</label>
+      <div class="field">
+        <div class="label-row"><label for="body">Your reply</label>
+          {% if saved_replies %}
+          <select class="insert-reply" data-target="body" aria-label="Insert a saved reply"
+                  data-name="{{ t.requester_name.split(' ')[0] }}" data-company="{{ t.company_name }}" data-tech="{{ g.tech.name }}">
+            <option value="">Insert saved reply…</option>
+            {% for r in saved_replies %}<option value="{{ r.body }}">{{ r.title }}</option>{% endfor %}
+          </select>
+          {% endif %}
+        </div>
         <textarea id="body" name="body" placeholder="Write the fix in plain steps. The person gets this {{ {'web': 'on their help page, and by email if email is set up', 'email': 'by email', 'whatsapp': 'on WhatsApp'}[t.channel] }}."></textarea></div>
+      <div class="row" style="margin-bottom:12px">
+        <div><label for="files">Attach pictures or PDFs</label><input type="file" id="files" name="files" accept="{{ file_accept }}" multiple></div>
+        <div style="max-width:150px"><label for="minutes">Time spent (minutes)</label><input type="number" id="minutes" name="minutes" min="1" max="1440" inputmode="numeric"></div>
+      </div>
       <label class="check"><input type="checkbox" name="save_guide" value="1" id="save_guide"
         onchange="document.getElementById('guide_title_wrap').hidden = !this.checked">
         When resolving, save this reply as a guide for {{ t.company_name }}, so the AI can use it next time</label>
@@ -64,20 +94,49 @@
     </div>
 
     <div class="card">
-      <h2>Assigned to</h2>
+      <h2>Handling</h2>
       <form method="post" action="{{ url_for('ticket_update', ticket_id=t.id) }}" class="row">
         {{ csrf() }}<input type="hidden" name="action" value="assign">
-        <select name="tech_id" aria-label="Technician">
+        <div><label for="tech_id">Assigned to</label>
+        <select name="tech_id" id="tech_id">
           <option value="">Nobody yet</option>
           {% for tech in techs %}<option value="{{ tech.id }}" {{ 'selected' if tech.id == t.assigned_to }}>{{ tech.name }}</option>{% endfor %}
-        </select>
+        </select></div>
         <button class="btn ghost fit">Save</button>
       </form>
+      <form method="post" action="{{ url_for('ticket_update', ticket_id=t.id) }}" class="row" style="margin-top:12px">
+        {{ csrf() }}<input type="hidden" name="action" value="priority">
+        <div><label for="priority">Priority</label>
+        <select name="priority" id="priority">
+          {% for key, p in priorities.items() %}<option value="{{ key }}" {{ 'selected' if key == t.priority }}>{{ p.label }}: reply within {{ p.hours }} hour{{ 's' if p.hours != 1 }}</option>{% endfor %}
+        </select></div>
+        <button class="btn ghost fit">Save</button>
+      </form>
+      {% if t.target_met is not none %}
+      <p class="small" style="margin:10px 0 0">{{ '✓ First reply was within the target' if t.target_met else 'First reply missed the target' }}</p>
+      {% endif %}
       {% if t.status == 'ai_answered' %}
       <form method="post" action="{{ url_for('ticket_update', ticket_id=t.id) }}" style="margin-top:12px">
         {{ csrf() }}<button class="btn ghost" name="action" value="take">Take over from the AI</button>
       </form>
       {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Time spent{% if time_total %}: {{ time_total|hours }}{% endif %}</h2>
+      {% if time_log %}
+      <ul class="plain">{% for e in time_log %}
+        <li class="small">{{ e.minutes|hours }} by {{ e.tech_name }}, {{ e.created_at|ago }}{% if e.note %}<br><span class="muted">{{ e.note }}</span>{% endif %}
+          <form method="post" action="{{ url_for('ticket_update', ticket_id=t.id) }}" style="display:inline">{{ csrf() }}
+            <input type="hidden" name="entry_id" value="{{ e.id }}"><button class="link" name="action" value="remove_time" aria-label="Remove this time entry">remove</button></form></li>
+      {% endfor %}</ul>
+      {% endif %}
+      <form method="post" action="{{ url_for('ticket_update', ticket_id=t.id) }}" class="row" style="margin-top:8px">
+        {{ csrf() }}<input type="hidden" name="action" value="log_time">
+        <div style="max-width:90px"><label for="log_minutes">Minutes</label><input type="number" id="log_minutes" name="minutes" min="1" max="1440" required inputmode="numeric"></div>
+        <div><label for="log_note">What for (optional)</label><input type="text" id="log_note" name="note" maxlength="200"></div>
+        <button class="btn ghost fit">Log</button>
+      </form>
     </div>
 
     {% if history %}

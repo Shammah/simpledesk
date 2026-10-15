@@ -69,7 +69,7 @@ REPLY_RULES = [
 ]
 
 SECRET_RULES = [
-    (r"(?i)\b(password|passcode|passwd|pwd|pin|otp)\b(\s*(is|was|:|=)\s*)(\S+)", r"\1\2[removed]"),
+    (r"(?i)\b(password|passcode|passwd|pwd|pw|pin|otp)\b(\s*(is|was|:|=)\s*)(\S+)", r"\1\2[removed]"),
     (r"\b(?:\d[ -]?){13,16}\b", "[number removed]"),
 ]
 

@@ -80,6 +80,50 @@ WhatsApp.
 Limits to know: Meta only lets a business reply freely within 24 hours of the
 person's last message, and replies are plain text.
 
+## Getting paid (Paystack: M-Pesa and cards)
+
+IT providers start on the free Starter plan (1 technician) and pay per
+technician for the Team plan, in Kenyan shillings. Prices are in `config.py`.
+
+1. Create an account at paystack.com (Kenya) and complete business verification.
+2. Under Settings > API Keys & Webhooks, copy the **secret key** into
+   `[paystack]` in `data/channels.ini`. Use the `sk_test_` key first; Paystack's
+   test M-Pesa numbers and cards let you try the whole flow without real money.
+3. On the same Paystack page, set the **Webhook URL** to the address shown on the
+   Channels page (`.../webhooks/paystack`).
+
+Owners pay for 1, 3 or 12 months with M-Pesa or a card on Paystack's page. Card
+payments renew automatically; M-Pesa payers get a reminder 3 days before the
+paid time ends. If nobody pays, the Team plan keeps working for 7 more days,
+then moves to Starter. Nothing is deleted. While no key is set, the Team plan
+can be switched on for free, for testing.
+
+Inside the Android app, prices and payment are hidden (Google's rules); owners
+pay on the website.
+
+## Other everyday features
+
+- **Forgot password / invites:** technicians reset their own password by email,
+  and new technicians get an invite link to choose their own. If email isn't
+  set up, the owner gets the link to pass on. `tools/reset_link.py EMAIL` makes
+  one from the command line, for when even the owner is locked out.
+- **Alerts:** technicians get an email when a ticket needs them, when staff
+  reply, and when a reply is overdue. Each chooses all tickets, only their own,
+  or none (Team & plan page).
+- **Priority and response targets:** urgent 1 hour, high 4, normal 8, low 24
+  (clock hours, in `config.py`). Staff choose how much it stops their work.
+- **Pictures and PDFs** on the help page, email and WhatsApp, up to 5 MB each.
+- **Time tracking and monthly client reports:** log minutes on each ticket; the
+  report (print, save as PDF or email) shows requests, response times, ratings,
+  time against the hours in their contract, and warranties ending. It can be
+  emailed automatically on the 1st of each month.
+- **Search** (top of the menu; `#12` jumps to ticket 12), **saved replies**,
+  and a **satisfaction rating** when a request is closed.
+
+Reminders, renewals, overdue alerts and automatic reports run in the
+background every 15 minutes: inside `python app.py` on this computer, and in
+the mail service on the server.
+
 ## Installing on a home screen
 
 SimpleDesk can be installed like an app, with its own icon and window.
@@ -119,6 +163,10 @@ Keys come from https://platform.claude.com. The model is set in `config.py`.
 | `app.py` | All screens and actions. |
 | `ai.py` | Automatic answers and their safety rules. |
 | `channels.py` | Sending and receiving email and WhatsApp. |
+| `payments.py` | Paystack: M-Pesa and card payments. |
+| `files.py` | Pictures and PDFs attached to tickets (kept in `data/uploads`). |
+| `monitoring.py` | Sentry error alerts and the health check. |
+| `tools/reset_link.py` | One-time password link for a locked-out account. |
 | `db.py` | Database tables. |
 | `channels.example.ini` | Template for `data/channels.ini`. |
 | `templates/`, `static/` | Page layouts and styling. |
@@ -129,15 +177,13 @@ Keys come from https://platform.claude.com. The model is set in `config.py`.
 | `deploy/` | Server setup, updates and the deployment guide. |
 | `templates/privacy_policy.html` | The public privacy policy. |
 | `data/helpdesk.db` | The database. Back this file up. |
-| `data/channels.ini` | Mail and WhatsApp passwords. Keep it private. |
+| `data/channels.ini` | Mail, WhatsApp and Paystack keys. Keep it private. |
 
 ## Before selling it to real customers
 
 - Put it online with HTTPS by following [deploy/DEPLOY.md](deploy/DEPLOY.md).
   `python app.py` is for trying it out on this computer.
-- Connect payments. Plans and per-technician pricing are calculated, but no
-  money is collected yet.
-- Let technicians reset their own passwords by email.
+- Add your Paystack live key (see "Getting paid") and test one real payment.
 - Add sign-in attempt limits and a limit on requests per help link.
 - One mailbox and one WhatsApp number serve the whole installation. Give each
   IT provider their own before selling to other providers.

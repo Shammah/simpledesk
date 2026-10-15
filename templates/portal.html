@@ -4,7 +4,7 @@
 {% block content %}
 <h1>IT help for {{ c.name }}</h1>
 <p class="muted">Tell us what is wrong. You will get an answer straight away, and a technician if you need one.</p>
-<form method="post" class="card">
+<form method="post" class="card" enctype="multipart/form-data">
   {{ csrf() }}
   <div class="row">
     <div><label for="name">Your name</label><input type="text" id="name" name="name" required></div>
@@ -12,6 +12,15 @@
   </div>
   <div class="field" style="margin-top:12px"><label for="problem">What is the problem?</label>
     <textarea id="problem" name="problem" required maxlength="6000" placeholder="For example: I cannot print to the office printer since this morning. It says 'offline'."></textarea></div>
+  <fieldset class="field choice">
+    <legend>How much is it stopping your work?</legend>
+    <label class="check"><input type="radio" name="urgency" value="urgent"> I can't work at all</label>
+    <label class="check"><input type="radio" name="urgency" value="normal" checked> It's slowing me down</label>
+    <label class="check"><input type="radio" name="urgency" value="low"> It's a question, no rush</label>
+  </fieldset>
+  <div class="field"><label for="files">Screenshot or photo of the problem (optional)</label>
+    <input type="file" id="files" name="files" accept="{{ file_accept }}" multiple>
+    <span class="small muted">Up to {{ max_files }} pictures or PDFs, {{ max_file_mb }} MB each.</span></div>
   <p class="small muted">Please do not include passwords. We will never ask for them.</p>
   <button class="btn">Get help</button>
 </form>

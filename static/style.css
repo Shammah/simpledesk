@@ -196,7 +196,8 @@ table tr:hover td { background: var(--panel-2); }
 
 /* Forms */
 label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
-input[type=text], input[type=email], input[type=password], input[type=date], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=date], input[type=number],
+input[type=search], select, textarea {
   width: 100%; padding: 10px 12px; border: 1px solid var(--field); border-radius: 10px;
   font: inherit; background: var(--panel-2); color: var(--ink);
   transition: border-color .2s, box-shadow .25s var(--ease), background-color .2s; }
@@ -434,6 +435,73 @@ html.is-loading.is-slow .loader-card { opacity: 1; transform: none; }
   pointer-events: none; animation: spark 1.1s var(--ease) forwards; }
 @keyframes spark { from { transform: translate(0, 0) scale(1); opacity: 1; }
   to { transform: translate(var(--dx), var(--dy)) scale(.3); opacity: 0; } }
+
+/* Search box at the top of the menu */
+.nav-search { margin: 0 0 12px; }
+.nav-search input { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.12); color: #fff; padding: 8px 11px; font-size: 14px; }
+.nav-search input::placeholder { color: #9fb0d4; }
+.nav-search input:focus { background: rgba(255,255,255,.1); }
+@media (max-width: 860px) { .nav.open .nav-menu a:nth-of-type(9) { transition-delay: .27s; } }
+
+/* Priority and response targets */
+.tag.prio-urgent { background: var(--bad-soft); color: var(--bad); border-color: var(--bad-line); }
+.tag.prio-high { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+.tag.prio-low { opacity: .8; }
+.late { color: var(--bad); font-weight: 600; }
+
+/* Attached pictures and files */
+input[type=file] { font: inherit; font-size: 14px; color: var(--muted); max-width: 100%; }
+input[type=file]::file-selector-button { font: inherit; font-size: 13px; font-weight: 600; margin-right: 10px; cursor: pointer;
+  padding: 7px 12px; border-radius: 9px; border: 1px solid var(--field); background: var(--panel); color: var(--ink);
+  transition: border-color .2s, background-color .2s; }
+input[type=file]::file-selector-button:hover { border-color: var(--brand); background: var(--brand-soft); }
+.files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.files .thumb { display: block; width: 120px; height: 90px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line);
+  background: var(--panel-2); transition: transform .2s var(--ease), box-shadow .25s var(--ease); }
+.files .thumb:hover { transform: translateY(-2px); box-shadow: 0 6px 16px var(--glow); }
+.files .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.files .file { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 10px; font-size: 13px;
+  border: 1px solid var(--line); background: var(--panel-2); }
+.files .file::before { content: "PDF"; font-size: 10px; font-weight: 700; color: var(--bad); }
+
+/* Reply box: saved replies picker beside the label */
+.label-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 5px; }
+.label-row label { margin: 0; }
+.label-row select { width: auto; max-width: 100%; padding: 5px 10px; font-size: 13px; }
+
+/* Plain-language choices on the help page */
+fieldset.choice { border: 0; padding: 0; margin: 0 0 14px; }
+fieldset.choice legend { font-size: 13px; font-weight: 600; margin-bottom: 7px; padding: 0; }
+
+/* Satisfaction faces */
+.faces { display: flex; gap: 10px; flex-wrap: wrap; }
+.face { flex: 1; min-width: 90px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px;
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer; border-radius: 12px;
+  border: 1px solid var(--field); background: var(--panel);
+  transition: transform .2s var(--ease), border-color .2s, box-shadow .25s var(--ease), background-color .2s; }
+.face span { font-size: 30px; line-height: 1; transition: transform .25s var(--ease); }
+.face:hover { transform: translateY(-2px); border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 6px 16px var(--glow); }
+.face:hover span { transform: scale(1.15); }
+
+/* Saved replies list */
+details.card summary { cursor: pointer; list-style: none; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+details.card summary::-webkit-details-marker { display: none; }
+details.card summary::before { content: "▸"; color: var(--muted); transition: transform .2s var(--ease); }
+details.card[open] summary::before { transform: rotate(90deg); }
+
+/* Monthly report: prints as a clean page */
+.report header { margin-bottom: 16px; }
+.report h2 { margin-top: 22px; }
+@media print {
+  @page { margin: 16mm; }
+  body { background: #fff !important; color: #000; }
+  .nav, .nav-backdrop, .no-print, .flash, .page-loader, .site-foot { display: none !important; }
+  .shell, .main { display: block; padding: 0; margin: 0; }
+  .report { border: 0; box-shadow: none; padding: 0; background: #fff; }
+  .report .stat { break-inside: avoid; background: #fff; border-color: #ccc; box-shadow: none; }
+  .report tr { break-inside: avoid; }
+  .report .bar span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 
 /* People who turn off motion in their system settings get a still page. */
 @media (prefers-reduced-motion: reduce) {

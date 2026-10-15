@@ -8,6 +8,7 @@
   <div class="field"><label for="email">Email</label><input type="email" id="email" name="email" required autofocus></div>
   <div class="field"><label for="password">Password</label><input type="password" id="password" name="password" required></div>
   <button class="btn">Sign in</button>
+  <p class="small" style="margin:12px 0 0"><a href="{{ url_for('forgot') }}">Forgot your password?</a></p>
 </form>
 <p class="small">New here? <a href="{{ url_for('signup') }}">Create an account</a></p>
 {% endblock %}

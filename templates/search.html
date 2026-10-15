@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Search - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Search</h1>
+  {% if q %}<p class="muted">{{ total }} result{{ 's' if total != 1 }} for “{{ q }}”{{ ' (showing up to 25 of each kind)' if total >= 25 }}</p>{% endif %}</div></div>
+
+<form method="get" class="card row">
+  <div><label for="q">Tickets, people, devices, serial numbers, guides or companies</label>
+    <input type="search" id="q" name="q" value="{{ q }}" autofocus></div>
+  <button class="btn fit">Search</button>
+</form>
+{% if q and q|length < 2 %}<p class="muted">Type at least 2 letters.</p>{% endif %}
+
+{% if found.tickets %}
+<div class="card"><h2>Tickets</h2>
+  <div class="scroll"><table>
+    {% for t in found.tickets %}
+    <tr><td class="muted">#{{ t.id }}</td><td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a><br><span class="small muted">{{ t.requester_name }}, {{ t.company_name }}</span></td>
+      <td><span class="tag {{ t.status }}">{{ status_labels[t.status] }}</span></td><td class="small muted">{{ t.created_at|ago }}</td></tr>
+    {% endfor %}
+  </table></div></div>
+{% endif %}
+
+{% if found.people %}
+<div class="card"><h2>People</h2><ul class="plain">
+  {% for p in found.people %}<li><a href="{{ url_for('company', company_id=p.company_id) }}#people">{{ p.name }}</a>
+    <span class="small muted">{{ p.company_name }}{% if p.email %} &middot; {{ p.email }}{% endif %}{% if p.phone %} &middot; +{{ p.phone }}{% endif %}</span></li>{% endfor %}
+</ul></div>
+{% endif %}
+
+{% if found.devices %}
+<div class="card"><h2>Devices</h2><ul class="plain">
+  {% for d in found.devices %}<li><a href="{{ url_for('company', company_id=d.company_id) }}#devices">{{ d.name }}</a>
+    <span class="small muted">{{ d.company_name }}{% if d.serial %} &middot; {{ d.serial }}{% endif %}{% if d.person_name %} &middot; {{ d.person_name }}{% endif %}</span></li>{% endfor %}
+</ul></div>
+{% endif %}
+
+{% if found.guides %}
+<div class="card"><h2>Guides</h2><ul class="plain">
+  {% for a in found.guides %}<li><a href="{{ url_for('guide_edit', article_id=a.id) }}">{{ a.title }}</a></li>{% endfor %}
+</ul></div>
+{% endif %}
+
+{% if found.companies %}
+<div class="card"><h2>Companies</h2><ul class="plain">
+  {% for c in found.companies %}<li><a href="{{ url_for('company', company_id=c.id) }}">{{ c.name }}</a></li>{% endfor %}
+</ul></div>
+{% endif %}
+
+{% if q|length >= 2 and not total %}<p class="muted">Nothing found.</p>{% endif %}
+{% endblock %}

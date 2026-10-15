@@ -28,7 +28,8 @@ def settings():
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(SETTINGS_PATH, encoding="utf-8")
     return {name: {k: v.strip() for k, v in parser[name].items()}
-            for name in ("app", "email_out", "email_in", "whatsapp") if parser.has_section(name)}
+            for name in ("app", "email_out", "email_in", "whatsapp", "paystack")
+            if parser.has_section(name)}
 
 
 def _section(name, required):
@@ -125,11 +126,16 @@ def fetch_emails():
             automatic = (str(msg.get("Auto-Submitted", "no")).lower() != "no"
                          or str(msg.get("Precedence", "")).lower() in ("bulk", "junk", "list")
                          or address.lower().startswith(("mailer-daemon", "postmaster", "no-reply", "noreply")))
+            files = []
+            for part in msg.iter_attachments():
+                content = part.get_payload(decode=True)
+                if content:
+                    files.append((part.get_filename() or "attachment", content))
             found.append(dict(
                 id="email:" + str(msg.get("Message-ID", "") or f"{address}:{msg.get('Date', '')}"),
                 address=address.lower(), name=name or address.split("@")[0],
                 subject=str(msg.get("Subject", "")).strip(),
-                body=clean_email_body(_plain_text(msg)), automatic=automatic))
+                body=clean_email_body(_plain_text(msg)), automatic=automatic, files=files))
     finally:
         try:
             box.logout()
@@ -190,7 +196,32 @@ def parse_whatsapp(payload):
                      for c in value.get("contacts", [])}
             for m in value.get("messages", []):
                 phone = normalize_phone(m.get("from", ""))
+                kind = m.get("type")
+                text, media = None, None
+                if kind == "text":
+                    text = m.get("text", {}).get("body", "")
+                elif kind in ("image", "document"):
+                    # A picture or file, maybe with a caption. Fetched later with fetch_whatsapp_media.
+                    info = m.get(kind, {})
+                    text = info.get("caption", "")
+                    media = dict(id=info.get("id", ""), filename=info.get("filename") or kind)
                 found.append(dict(
                     id="wa:" + m.get("id", ""), phone=phone, name=names.get(m.get("from"), ""),
-                    text=m.get("text", {}).get("body", "") if m.get("type") == "text" else None))
+                    text=text, media=media))
     return found
+
+
+def fetch_whatsapp_media(media_id):
+    """Download a picture or file someone sent on WhatsApp. Returns bytes, or None."""
+    cfg = whatsapp()
+    if not cfg or not media_id:
+        return None
+    auth = {"Authorization": f"Bearer {cfg['access_token']}"}
+    try:
+        info_url = f"https://graph.facebook.com/{cfg.get('api_version') or 'v24.0'}/{media_id}"
+        with urllib.request.urlopen(urllib.request.Request(info_url, headers=auth), timeout=20) as resp:
+            file_url = json.loads(resp.read().decode())["url"]
+        with urllib.request.urlopen(urllib.request.Request(file_url, headers=auth), timeout=60) as resp:
+            return resp.read(20 * 1024 * 1024)
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return None

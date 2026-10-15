@@ -18,6 +18,9 @@
     <div class="n">{{ (all_time.reply_minutes ~ ' min') if all_time.reply_minutes is not none else '-' }}</div>
     <div class="l">average time to first reply</div>
   </div>
+  <div class="stat"><div class="n">{{ month.on_time_rate ~ '%' if month.on_time_rate is not none else '-' }}</div><div class="l">replies within target this month{% if all_time.late %}, <strong class="late">{{ all_time.late }} late now</strong>{% endif %}</div></div>
+  <div class="stat"><div class="n">{{ all_time.happy_rate ~ '%' if all_time.happy_rate is not none else '-' }}</div><div class="l">rated the help good ({{ all_time.rated }} rating{{ 's' if all_time.rated != 1 }})</div></div>
+  <div class="stat"><div class="n">{{ month.minutes|hours }}</div><div class="l">technician time logged this month</div></div>
 </div>
 
 <div class="cols">
@@ -26,13 +29,16 @@
       <h2>Needs a technician</h2>
       {% if queue %}
       <div class="scroll"><table>
-        <tr><th>Request</th><th>Company</th><th>Why it came to you</th><th>Opened</th></tr>
+        <tr><th>Request</th><th>Company</th><th>Why it came to you</th><th>Reply</th></tr>
         {% for t in queue %}
+        {% set due = due_label(t) %}
         <tr>
-          <td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a><br><span class="muted small">{{ t.requester_name }}</span></td>
+          <td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a>
+            {% if t.priority != 'normal' %}<span class="tag prio-{{ t.priority }}">{{ priorities[t.priority].label }}</span>{% endif %}
+            <br><span class="muted small">{{ t.requester_name }}</span></td>
           <td>{{ t.company_name }}</td>
           <td class="small">{{ t.escalation_reason }}</td>
-          <td class="small muted">{{ t.created_at|ago }}</td>
+          <td class="small {{ 'late' if due.startswith('Late') else 'muted' }}">{{ due or ('opened ' ~ t.created_at|ago) }}</td>
         </tr>
         {% endfor %}
       </table></div>

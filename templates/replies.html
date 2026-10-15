@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Saved replies - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Saved replies</h1>
+  <p class="muted">Answers you give often. Insert one into a ticket reply with a click, then adjust it if needed.</p></div></div>
+
+<div class="card">
+  <h2>New saved reply</h2>
+  <form method="post">
+    {{ csrf() }}
+    <div class="field"><label for="title">Name</label><input type="text" id="title" name="title" maxlength="100" placeholder="Password reset done" required></div>
+    <div class="field"><label for="body">Text</label>
+      <textarea id="body" name="body" required placeholder="Hi {name}, I've reset your password. You'll be asked to choose a new one when you next sign in.&#10;&#10;{tech}"></textarea>
+      <span class="small muted">{name} becomes the person's first name, {company} their company and {tech} your name.</span></div>
+    <button class="btn fit">Save</button>
+  </form>
+</div>
+
+{% for r in replies %}
+<details class="card">
+  <summary><strong>{{ r.title }}</strong> <span class="muted small">{{ r.body[:90] }}{{ '…' if r.body|length > 90 }}</span></summary>
+  <form method="post" style="margin-top:12px">
+    {{ csrf() }}<input type="hidden" name="reply_id" value="{{ r.id }}">
+    <div class="field"><label for="t{{ r.id }}">Name</label><input type="text" id="t{{ r.id }}" name="title" value="{{ r.title }}" maxlength="100" required></div>
+    <div class="field"><label for="b{{ r.id }}">Text</label><textarea id="b{{ r.id }}" name="body" required>{{ r.body }}</textarea></div>
+    <div class="row">
+      <button class="btn ghost fit">Save</button>
+      <button class="btn danger fit" name="delete" value="1" formnovalidate onclick="return confirm('Delete this saved reply?')">Delete</button>
+    </div>
+  </form>
+</details>
+{% else %}
+<p class="muted">No saved replies yet.</p>
+{% endfor %}
+{% endblock %}

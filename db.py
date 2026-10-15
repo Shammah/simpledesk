@@ -144,7 +144,84 @@ MIGRATIONS = [
     # 'sent by email', 'sent by WhatsApp', or 'failed: reason'
     ("messages", "delivery", "TEXT NOT NULL DEFAULT ''"),
     ("technicians", "tour_done", "INTEGER NOT NULL DEFAULT 0"),   # has seen the welcome tour
+    # Which tickets to email them about: all, mine (assigned to them) or none
+    ("technicians", "notify", "TEXT NOT NULL DEFAULT 'all'"),
+    # Billing: paid up to this time (UTC). Saved card details are Paystack's
+    # reusable code, never the card number itself.
+    ("providers", "paid_until", "TEXT"),
+    ("providers", "billing_email", "TEXT NOT NULL DEFAULT ''"),
+    ("providers", "card_code", "TEXT NOT NULL DEFAULT ''"),
+    ("providers", "card_label", "TEXT NOT NULL DEFAULT ''"),
+    ("providers", "billing_notice", "TEXT NOT NULL DEFAULT ''"),   # last reminder sent, to avoid repeats
+    # Response targets
+    ("tickets", "priority", "TEXT NOT NULL DEFAULT 'normal'"),
+    ("tickets", "waiting_since", "TEXT"),     # when it last came to a technician
+    ("tickets", "due_at", "TEXT"),            # first technician reply due by
+    ("tickets", "target_met", "INTEGER"),     # NULL until a technician replies, then 1 or 0
+    ("tickets", "late_alerted", "INTEGER NOT NULL DEFAULT 0"),
+    # Satisfaction: 3 good, 2 okay, 1 not good
+    ("tickets", "rating", "INTEGER"),
+    ("tickets", "rating_note", "TEXT NOT NULL DEFAULT ''"),
+    # Monthly client report
+    ("companies", "report_email", "TEXT NOT NULL DEFAULT ''"),
+    ("companies", "report_auto", "INTEGER NOT NULL DEFAULT 0"),
+    ("companies", "last_report", "TEXT NOT NULL DEFAULT ''"),      # 'YYYY-MM' last sent automatically
+    ("companies", "monthly_hours", "REAL NOT NULL DEFAULT 0"),     # hours included in their contract; 0 = not set
 ]
+
+# Tables added after the first version.
+LATER_TABLES = """
+CREATE TABLE IF NOT EXISTS sign_in_links (
+    id INTEGER PRIMARY KEY,
+    tech_id INTEGER NOT NULL REFERENCES technicians(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,            -- reset or invite
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    reference TEXT NOT NULL UNIQUE,
+    amount INTEGER NOT NULL,       -- whole shillings
+    seats INTEGER NOT NULL,
+    months INTEGER NOT NULL,
+    status TEXT NOT NULL,          -- pending, paid, failed
+    method TEXT NOT NULL DEFAULT '',
+    automatic INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    paid_at TEXT
+);
+CREATE TABLE IF NOT EXISTS time_entries (
+    id INTEGER PRIMARY KEY,
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    tech_id INTEGER REFERENCES technicians(id) ON DELETE SET NULL,
+    tech_name TEXT NOT NULL,
+    minutes INTEGER NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY,
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL UNIQUE,
+    content_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS saved_replies (
+    id INTEGER PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_time_ticket ON time_entries(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_files_ticket ON attachments(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_payments_provider ON payments(provider_id);
+"""
 
 
 def init():
@@ -162,5 +239,6 @@ def init():
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
             if column == "delivery":
                 conn.execute("UPDATE messages SET delivery = 'n/a'")
+    conn.executescript(LATER_TABLES)
     conn.commit()
     conn.close()

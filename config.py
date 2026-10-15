@@ -20,7 +20,7 @@ HTTPS = os.environ.get("SIMPLEDESK_HTTPS") == "1"
 # ---- Shown on the public privacy policy page ----
 BUSINESS_NAME = os.environ.get("SIMPLEDESK_BUSINESS_NAME", "SimpleDesk")
 CONTACT_EMAIL = os.environ.get("SIMPLEDESK_CONTACT_EMAIL", "privacy@example.com")   # change before publishing
-POLICY_UPDATED = "15 October 2026"
+POLICY_UPDATED = "16 October 2026"
 
 # ---- Android app (Play Store) ----
 # server: from PWABuilder after you build the Android package. Together they
@@ -32,8 +32,14 @@ ANDROID_CERT_SHA256 = [f.strip() for f in os.environ.get("SIMPLEDESK_ANDROID_SHA
 BACKUP_DIR = Path(os.environ.get("SIMPLEDESK_BACKUP_DIR") or DATA_DIR / "backups")
 BACKUP_KEEP_DAYS = 30
 
-# ---- Pricing: charged per technician, per month ----
-CURRENCY = "$"
+# ---- Pictures and files people attach to tickets ----
+UPLOAD_DIR = DATA_DIR / "uploads"
+MAX_FILE_MB = 5
+MAX_FILES_PER_MESSAGE = 3
+
+# ---- Pricing: charged per technician, per month, in Kenyan shillings ----
+# Payments go through Paystack (M-Pesa and cards). Keys go in data/channels.ini.
+CURRENCY = "KES"
 PLANS = {
     "free": {
         "name": "Starter",
@@ -43,11 +49,29 @@ PLANS = {
     },
     "pro": {
         "name": "Team",
-        "price_per_tech": 19,
+        "price_per_tech": 2500,
         "max_techs": None,
         "ai_replies_per_tech": 500,
     },
 }
+DAYS_PER_MONTH_PAID = 30
+# After the paid time ends, the Team plan keeps working this many days while
+# the customer pays, then drops back to Starter.
+PAYMENT_GRACE_DAYS = 7
+RENEWAL_REMINDER_DAYS = 3
+
+# ---- Response targets: hours until a technician should first reply ----
+# Counted from when the ticket comes to a technician, in plain clock hours.
+PRIORITIES = {
+    "urgent": {"label": "Urgent", "hours": 1},
+    "high": {"label": "High", "hours": 4},
+    "normal": {"label": "Normal", "hours": 8},
+    "low": {"label": "Low", "hours": 24},
+}
+
+# ---- Sign-in links sent by email ----
+RESET_LINK_HOURS = 1
+INVITE_LINK_DAYS = 7
 
 # ---- AI limits ----
 AI_MODEL = os.environ.get("HELPDESK_AI_MODEL", "claude-opus-5-5")

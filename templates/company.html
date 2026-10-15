@@ -5,6 +5,7 @@
   <div><p class="small muted"><a href="{{ url_for('companies') }}">Companies</a> /</p><h1>{{ c.name }}</h1></div>
   <div class="row">
     <a class="btn ghost fit" href="{{ url_for('tickets', status='all', company=c.id) }}">Tickets</a>
+    <a class="btn ghost fit" href="{{ url_for('company_report', company_id=c.id) }}">Monthly report</a>
     <a class="btn fit" href="{{ url_for('company_export', company_id=c.id) }}" data-no-loader>Download all data</a>
   </div>
 </div>
@@ -39,6 +40,20 @@
   <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}" class="row">
     {{ csrf() }}<input type="hidden" name="action" value="email_domain">
     <div><label for="email_domain">Email domain</label><input type="text" id="email_domain" name="email_domain" value="{{ c.email_domain }}" placeholder="theircompany.com"></div>
+    <button class="btn ghost fit">Save</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Monthly report</h2>
+  <p class="muted small">A summary of their requests, response times, ratings, time you spent and warranties ending. <a href="{{ url_for('company_report', company_id=c.id) }}">See last month's report</a>.</p>
+  <form method="post" action="{{ url_for('company_settings', company_id=c.id) }}">
+    {{ csrf() }}<input type="hidden" name="action" value="report">
+    <div class="row">
+      <div><label for="report_email">Send reports to</label><input type="email" id="report_email" name="report_email" value="{{ c.report_email }}" placeholder="manager@theircompany.com"></div>
+      <div style="max-width:190px"><label for="monthly_hours">Hours included per month</label><input type="number" id="monthly_hours" name="monthly_hours" min="0" step="0.5" value="{{ (c.monthly_hours|round(1)) if c.monthly_hours else '' }}" placeholder="Not set"></div>
+    </div>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="report_auto" value="1" {{ 'checked' if c.report_auto }}> Email it automatically on the 1st of each month</label>
     <button class="btn ghost fit">Save</button>
   </form>
 </div>

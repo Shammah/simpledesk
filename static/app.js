@@ -89,6 +89,23 @@
     startLoading();
   });
 
+  // Saved replies: drop the chosen text into the reply box, with the person's
+  // first name, their company and your name filled in.
+  document.addEventListener("change", function (e) {
+    var pick = e.target.closest("select.insert-reply");
+    if (!pick || !pick.value) return;
+    var box = document.getElementById(pick.dataset.target);
+    var text = pick.value
+      .replace(/\{name\}/g, pick.dataset.name || "")
+      .replace(/\{company\}/g, pick.dataset.company || "")
+      .replace(/\{tech\}/g, pick.dataset.tech || "");
+    if (box) {
+      box.value = box.value.trim() ? box.value.replace(/\s*$/, "") + "\n\n" + text : text;
+      box.focus();
+    }
+    pick.value = "";
+  });
+
   // Installing on a home screen or desktop.
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function () {

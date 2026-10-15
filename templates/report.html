@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} report, {{ label }} - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="head no-print">
+  <div><p class="small muted"><a href="{{ url_for('companies') }}">Companies</a> / <a href="{{ url_for('company', company_id=c.id) }}">{{ c.name }}</a> /</p>
+    <h1>Monthly report</h1></div>
+  <form method="get" class="row">
+    <div><label for="month">Month</label><select id="month" name="month" onchange="this.form.submit()">
+      {% for mo in months %}<option value="{{ mo }}" {{ 'selected' if mo == key }}>{{ mo }}</option>{% endfor %}</select></div>
+  </form>
+</div>
+
+<div class="card no-print">
+  <div class="row">
+    <button type="button" class="btn fit" onclick="window.print()">Print or save as PDF</button>
+    <form method="post" class="row">
+      {{ csrf() }}<input type="hidden" name="month" value="{{ key }}">
+      <div><label for="to">Email it to</label><input type="email" id="to" name="to" value="{{ c.report_email }}" placeholder="manager@theircompany.com" required></div>
+      <button class="btn ghost fit">Email report</button>
+    </form>
+  </div>
+</div>
+
+<article class="report card">
+  <header>
+    <p class="muted small">{{ provider.name }} &middot; IT support report</p>
+    <h1>{{ c.name }}: {{ label }}</h1>
+  </header>
+
+  <div class="grid">
+    <div class="stat"><div class="n">{{ m.total }}</div><div class="l">requests</div></div>
+    <div class="stat"><div class="n">{{ m.resolved }}</div><div class="l">resolved</div></div>
+    <div class="stat"><div class="n">{{ m.by_ai }}</div><div class="l">answered instantly, no technician needed</div></div>
+    <div class="stat"><div class="n">{{ m.on_time_rate ~ '%' if m.on_time_rate is not none else '-' }}</div><div class="l">technician replies within target</div></div>
+    <div class="stat"><div class="n">{{ m.happy_rate ~ '%' if m.happy_rate is not none else '-' }}</div><div class="l">rated the help good{% if m.rated %} ({{ m.rated }} rating{{ 's' if m.rated != 1 }}){% endif %}</div></div>
+    <div class="stat"><div class="n">{{ minutes|hours }}</div><div class="l">technician time{% if included %}, of {{ included|hours }} included{% if minutes > included %}: <strong>{{ (minutes - included)|hours }} extra</strong>{% endif %}{% endif %}</div></div>
+  </div>
+
+  {% if categories %}
+  <h2>Most common problems</h2>
+  <ul class="plain">{% for cat in categories %}
+    <li><div style="display:flex;justify-content:space-between"><span>{{ cat.category }}</span><span class="muted small">{{ cat.n }}</span></div>
+      <div class="bar"><span style="width: {{ (100 * cat.n / categories[0].n)|round|int }}%"></span></div></li>
+  {% endfor %}</ul>
+  {% endif %}
+
+  <h2>Requests</h2>
+  {% if tickets %}
+  <div class="scroll"><table>
+    <tr><th>Date</th><th>Request</th><th>From</th><th>Status</th><th>Time</th></tr>
+    {% for t in tickets %}
+    <tr><td class="small">{{ t.created_at[:10] }}</td><td>{{ t.subject }}</td><td class="small">{{ t.requester_name }}</td>
+      <td class="small">{{ status_labels[t.status] }}{% if t.resolved_by == 'ai' %} (instant answer){% endif %}</td>
+      <td class="small">{{ t.minutes|hours if t.minutes else '' }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">No requests this month.</p>{% endif %}
+
+  {% if checklists %}
+  <h2>Starters and leavers</h2>
+  <ul class="plain">{% for x in checklists %}<li>{{ x.template_name }}: {{ x.subject_name }} <span class="muted small">{{ x.done }} of {{ x.total }} steps done</span></li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if warranties %}
+  <h2>Warranties ended or ending in the next 60 days</h2>
+  <ul class="plain">{% for d in warranties %}<li>{{ d.name }} <span class="muted small">{{ d.person_name or 'Unassigned' }}</span>
+    <span class="tag {{ 'bad' if d.warranty_end < today else 'open' }}">{{ d.warranty_end }}</span></li>{% endfor %}</ul>
+  {% endif %}
+</article>
+{% endblock %}

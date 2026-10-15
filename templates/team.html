@@ -2,38 +2,87 @@
 {% block title %}Team & plan - {{ app_name }}{% endblock %}
 {% block content %}
 {% set owner = g.tech.role == 'owner' %}
-{# Inside the Play Store app, prices and plan changes are hidden: Google requires its own billing for that. #}
+{% set price = plans.pro.price_per_tech %}
+{# Inside the Play Store app, prices and payment are hidden: Google requires its own billing for that. #}
 <div class="head"><div><h1>Team &amp; plan</h1><p class="muted">{{ 'Your team and this month''s allowance.' if g.android else 'You pay per technician. Client companies and their staff are unlimited.' }}</p></div></div>
 
+{% if not g.android and bill.pay_state == 'due' %}
+<div class="note warn"><strong>Payment due.</strong> Your Team plan ended on {{ bill.paid_until[:10] }}. It keeps working for {{ grace_days }} days in total while you pay, then moves to Starter. Nothing is deleted.</div>
+{% endif %}
+
 <div class="grid">
-  {% if not g.android %}<div class="stat hero"><div class="n">{{ currency }}{{ bill.monthly_cost }}</div><div class="l">per month: {{ bill.seats }} technician{{ 's' if bill.seats != 1 }} &times; {{ currency }}{{ bill.plan.price_per_tech }}</div></div>{% endif %}
-  <div class="stat{{ ' hero' if g.android }}"><div class="n">{{ bill.plan.name }}</div><div class="l">current plan</div></div>
+  <div class="stat hero"><div class="n">{{ bill.plan.name }}</div><div class="l">current plan{% if bill.pay_state == 'paid' and not g.android %}, paid until {{ bill.paid_until[:10] }}{% endif %}</div></div>
+  {% if not g.android %}<div class="stat"><div class="n">{{ bill.team_cost|money }}</div><div class="l">a month for the Team plan: {{ [bill.seats, 1]|max }} technician{{ 's' if bill.seats != 1 }} &times; {{ price|money }}</div></div>{% endif %}
   <div class="stat"><div class="n">{{ bill.ai_left }}</div><div class="l">AI replies left this month, of {{ bill.ai_allowance }}</div></div>
   {% if g.android %}<div class="stat"><div class="n">{{ bill.seats }}</div><div class="l">technician{{ 's' if bill.seats != 1 }}</div></div>{% endif %}
 </div>
 
 {% if g.android %}
-<div class="note">Plan changes aren't available in the Android app.</div>
+<div class="note">Plans and payments are managed on the website, not in the Android app.</div>
 {% else %}
 <div class="half">
-  {% for key, p in plans.items() %}
   <div class="card">
-    <h2>{{ p.name }} {% if key == bill.plan_key %}<span class="tag good">Current</span>{% endif %}</h2>
-    <p><span style="font-size:26px;font-weight:700">{{ currency }}{{ p.price_per_tech }}</span> <span class="muted">per technician, per month</span></p>
+    <h2>Team {% if bill.plan_key == 'pro' %}<span class="tag good">Current</span>{% endif %}</h2>
+    <p><span style="font-size:26px;font-weight:700">{{ price|money }}</span> <span class="muted">per technician, per month</span></p>
     <ul>
-      <li>{{ 'Up to ' ~ p.max_techs ~ ' technician' if p.max_techs else 'Unlimited technicians' }}</li>
-      <li>{{ p.ai_replies_per_tech }} AI replies per technician each month</li>
+      <li>Unlimited technicians</li>
+      <li>{{ plans.pro.ai_replies_per_tech }} AI replies per technician each month</li>
       <li>Unlimited client companies, people and devices</li>
-      <li>Data download at any time</li>
     </ul>
-    {% if owner and key != bill.plan_key %}
-    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="plan"><input type="hidden" name="plan" value="{{ key }}">
-      <button class="btn">Switch to {{ p.name }}</button></form>
+    {% if owner %}
+      {% if payments_ready %}
+      <form method="post" class="row">
+        {{ csrf() }}<input type="hidden" name="action" value="pay">
+        <div><label for="months">{{ 'Add time' if bill.plan_key == 'pro' else 'Pay for' }}</label>
+          <select id="months" name="months">
+            {% for n in [1, 3, 12] %}<option value="{{ n }}">{{ n }} month{{ 's' if n > 1 }}: {{ (bill.team_cost * n)|money }}</option>{% endfor %}
+          </select></div>
+        <button class="btn fit">Pay with M-Pesa or card</button>
+      </form>
+      <p class="small muted" style="margin-top:8px">You pay on Paystack's secure page. We never see your card number or M-Pesa PIN.
+        {% if bill.plan_key == 'pro' %}New time is added after your current paid time.{% endif %}</p>
+      {% elif bill.plan_key != 'pro' %}
+      <form method="post">{{ csrf() }}<input type="hidden" name="action" value="plan"><input type="hidden" name="plan" value="pro">
+        <button class="btn">Switch to Team (test mode)</button></form>
+      <p class="small muted" style="margin-top:8px">Online payment isn't set up yet (see Channels), so this switches without paying.</p>
+      {% endif %}
     {% endif %}
   </div>
-  {% endfor %}
+
+  <div class="card">
+    <h2>Starter {% if bill.plan_key == 'free' %}<span class="tag good">Current</span>{% endif %}</h2>
+    <p><span style="font-size:26px;font-weight:700">Free</span></p>
+    <ul>
+      <li>1 technician</li>
+      <li>{{ plans.free.ai_replies_per_tech }} AI replies each month</li>
+      <li>Unlimited client companies, people and devices</li>
+    </ul>
+    {% if owner and bill.plan_key == 'pro' %}
+    <form method="post" onsubmit="return confirm('Move to Starter? Any paid time left is not refunded.')">{{ csrf() }}<input type="hidden" name="action" value="plan"><input type="hidden" name="plan" value="free">
+      <button class="btn ghost">Move to Starter</button></form>
+    {% endif %}
+  </div>
 </div>
-<p class="small muted">Payment collection is not connected yet, so switching plans is free while you are testing. When the allowance runs out, requests go straight to a technician and nothing is lost.</p>
+
+{% if owner and (g.provider.card_label or history) %}
+<div class="card">
+  <h2>Billing</h2>
+  {% if g.provider.card_label %}
+  <p>Renews automatically with your <strong>{{ g.provider.card_label }}</strong>.</p>
+  <form method="post" style="margin-bottom:14px">{{ csrf() }}<button class="link" name="action" value="forget_card">Stop automatic renewal and remove this card</button></form>
+  {% endif %}
+  {% if history %}
+  <div class="scroll"><table>
+    <tr><th>Date</th><th>Amount</th><th>For</th><th>Paid with</th><th>Reference</th></tr>
+    {% for p in history %}
+    <tr><td class="small">{{ p.paid_at[:10] }}</td><td>{{ p.amount|money }}</td>
+      <td class="small">{{ p.months }} month{{ 's' if p.months > 1 }}, {{ p.seats }} technician{{ 's' if p.seats > 1 }}{{ ' (automatic)' if p.automatic }}</td>
+      <td class="small">{{ p.method }}</td><td class="small muted">{{ p.reference }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+</div>
+{% endif %}
 {% endif %}
 
 <div class="card">
@@ -41,10 +90,17 @@
   <div class="scroll"><table>
     <tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
     {% for t in techs %}
-    <tr><td>{{ t.name }}</td><td>{{ t.email }}</td><td>{{ 'Owner' if t.role == 'owner' else 'Technician' }}</td>
-      <td>{% if owner and t.role != 'owner' %}
+    <tr><td>{{ t.name }}</td><td>{{ t.email }}</td>
+      <td>{{ 'Owner' if t.role == 'owner' else 'Technician' }}{% if not t.password_hash %} <span class="tag open">Invited</span>{% endif %}</td>
+      <td>{% if owner and t.id != g.tech.id %}
+        <div class="row" style="gap:12px">
+        <form method="post">{{ csrf() }}<input type="hidden" name="tech_id" value="{{ t.id }}">
+          <button class="link" name="action" value="resend">{{ 'Resend invite' if not t.password_hash else 'Password reset link' }}</button></form>
+        {% if t.role != 'owner' %}
         <form method="post" data-confirm="Remove {{ t.name }}? They will no longer be able to sign in." onsubmit="return confirm(this.dataset.confirm)">{{ csrf() }}
           <input type="hidden" name="action" value="remove"><input type="hidden" name="tech_id" value="{{ t.id }}"><button class="link">Remove</button></form>
+        {% endif %}
+        </div>
       {% endif %}</td></tr>
     {% endfor %}
   </table></div>
@@ -54,10 +110,32 @@
     <div class="row">
       <div><label for="name">Name</label><input type="text" id="name" name="name" required></div>
       <div><label for="email">Email</label><input type="email" id="email" name="email" required></div>
-      <div><label for="password">Starting password</label><input type="password" id="password" name="password" minlength="8" required autocomplete="new-password"></div>
-      <button class="btn ghost fit">Add technician</button>
+      <button class="btn ghost fit">Invite technician</button>
     </div>
+    <p class="small muted" style="margin-top:8px">They get an email with a link to choose their own password.{% if not g.android and bill.plan_key == 'pro' %} Each technician adds {{ price|money }} a month from your next renewal.{% endif %}</p>
   </form>
   {% endif %}
+</div>
+
+<div class="half">
+  <div class="card">
+    <h2>Your email alerts</h2>
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="action" value="my_settings">
+      {% for value, label in [('all', 'Every ticket that needs a technician, and anything assigned to me'), ('mine', 'Only tickets assigned to me'), ('none', 'No emails')] %}
+      <label class="check"><input type="radio" name="notify" value="{{ value }}" {{ 'checked' if g.tech.notify == value }}> {{ label }}</label>
+      {% endfor %}
+      <button class="btn ghost fit">Save</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Change your password</h2>
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="action" value="my_password">
+      <div class="field"><label for="current_password">Current password</label><input type="password" id="current_password" name="current_password" required autocomplete="current-password"></div>
+      <div class="field"><label for="new_password">New password</label><input type="password" id="new_password" name="new_password" minlength="8" required autocomplete="new-password"></div>
+      <button class="btn ghost fit">Change password</button>
+    </form>
+  </div>
 </div>
 {% endblock %}

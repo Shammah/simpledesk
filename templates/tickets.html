@@ -26,6 +26,8 @@
       <td>{{ t.company_name }}</td>
       <td class="small">{{ t.category }}{% if t.channel != 'web' %}<br><span class="tag">{{ 'WhatsApp' if t.channel == 'whatsapp' else 'Email' }}</span>{% endif %}</td>
       <td><span class="tag {{ t.status }}">{{ status_labels[t.status] }}</span>
+        {% if t.priority != 'normal' %}<span class="tag prio-{{ t.priority }}">{{ priorities[t.priority].label }}</span>{% endif %}
+        {% set due = due_label(t) %}{% if due %}<br><span class="small {{ 'late' if due.startswith('Late') else 'muted' }}">{{ due }}</span>{% endif %}
         {% if t.resolved_by %}<span class="small muted">by {{ 'AI' if t.resolved_by == 'ai' else 'technician' }}</span>{% endif %}</td>
       <td class="small">{{ t.tech_name or '' }}</td>
       <td class="small muted">{{ t.created_at|ago }}</td>
